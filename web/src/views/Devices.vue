@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import { storeToRefs } from 'pinia'
-import { useRoute, useRouter } from 'vue-router'
+import { useRoute, useRouter, type LocationQueryRaw } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import PageHeader from '../components/PageHeader.vue'
 import ErrorState from '../components/ErrorState.vue'
@@ -65,6 +65,7 @@ const selectedId = ref('')
 const selectedDetail = ref<DeviceOverviewItem | null>(null)
 const hasAutoSelected = ref(false)
 const deviceTabs = new Set(['overview', 'esim', 'at', 'ussd', 'config', 'card'])
+let lastMissingRouteDeviceNotice = ''
 
 const editConfig = ref<DeviceConfigDTO | null>(null)
 const editBaseline = ref('')
@@ -206,6 +207,40 @@ function applyRouteSelection(): boolean {
   selectedId.value = deviceID
   hasAutoSelected.value = true
   return true
+}
+
+function reconcileRouteQueryWithDevices() {
+  const tab = firstQueryValue(route.query.tab).trim()
+  const deviceID = firstQueryValue(route.query.device).trim()
+  const nextQuery: LocationQueryRaw = { ...route.query }
+  let changed = false
+
+  if (tab && !deviceTabs.has(tab)) {
+    activeTab.value = 'overview'
+    nextQuery.tab = 'overview'
+    changed = true
+  }
+
+  if (deviceID && !devices.value.some(d => d.id === deviceID)) {
+    delete nextQuery.device
+    changed = true
+    if (selectedId.value === deviceID) {
+      selectedId.value = ''
+      selectedDetail.value = null
+      hasAutoSelected.value = false
+    }
+    if (lastMissingRouteDeviceNotice !== deviceID) {
+      lastMissingRouteDeviceNotice = deviceID
+      ElMessage.warning(`设备 ${deviceID} 当前不在线`)
+    }
+  }
+
+  if (changed) {
+    void router.replace({
+      name: 'Devices',
+      query: nextQuery
+    })
+  }
 }
 
 function nativeMccMnc(modem: ModemStatus | undefined): string {
@@ -631,6 +666,7 @@ async function fetchAll() {
     if (!listResult.ok) throw new Error(listResult.error.message)
     devices.value = (storeList.value || []) as DeviceMgmtListItem[]
     loadLastOkAt.value = Date.now()
+    reconcileRouteQueryWithDevices()
     applyRouteSelection()
 
     if (!hasAutoSelected.value && !selectedId.value && devices.value.length) {
@@ -676,6 +712,7 @@ async function refreshListOnly() {
     const listResult = await devicesStore.fetchList(listAbort.signal)
     if (!listResult.ok) throw new Error(listResult.error.message)
     devices.value = (storeList.value || []) as DeviceMgmtListItem[]
+    reconcileRouteQueryWithDevices()
     // 自动刷新时如果当前选中的设备突然不在列表中，不要强行将其重置。
     // 这可以避免正在配置某设备时，因为网络或拔插一秒钟的掉线导致系统强制关闭当前配置并把页面顶上去拉回到第一项。
     if (!hasAutoSelected.value && !selectedId.value && devices.value.length) {
@@ -737,6 +774,18 @@ function scheduleRefreshDeviceViews(delayMs: number) {
   }, delayMs)
 }
 
+function openCardPolicyTab() {
+  activeTab.value = 'card'
+  void router.replace({
+    name: 'Devices',
+    query: {
+      ...route.query,
+      device: selectedId.value,
+      tab: 'card'
+    }
+  })
+}
+
 async function selectDevice(id: string) {
   const next = String(id || '').trim()
   if (!next) return
@@ -757,6 +806,7 @@ async function selectDevice(id: string) {
 watch(
   () => [route.query.device, route.query.tab],
   () => {
+    reconcileRouteQueryWithDevices()
     const selectionChanged = applyRouteSelection()
     if (!selectionChanged) return
     void Promise.all([
@@ -921,12 +971,20 @@ async function saveConfig() {
 async function deleteDevice() {
   const id = String(selectedId.value || '').trim()
   if (!id) return
-  const confirmed = await ElMessageBox.confirm(
-    `确定删除设备 ${id} 的配置？删除后该设备将停止接管（代理/网络/AT）。`,
-    '确认删除',
-    { confirmButtonText: '删除', cancelButtonText: '取消', type: 'warning' }
-  ).then(() => true).catch(() => false)
-  if (!confirmed) return
+  const { value: input } = await ElMessageBox.prompt(
+    `此操作不可逆。删除设备 ${id} 的配置后，该设备将停止接管代理、网络和 AT；如有运行中的接管实例会被移除。请输入设备 ID「${id}」以确认删除。`,
+    '删除设备配置',
+    {
+      confirmButtonText: '确认删除',
+      cancelButtonText: '取消',
+      inputPattern: new RegExp(`^${id.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`),
+      inputErrorMessage: `请输入完整设备 ID：${id}`,
+      inputPlaceholder: id,
+      type: 'error',
+      confirmButtonClass: '!bg-red-600 !border-red-600 hover:!bg-red-700'
+    }
+  ).catch(() => ({ value: '' }))
+  if (input !== id) return
 
   deleting.value = true
   try {
@@ -1287,7 +1345,13 @@ usePollingScheduler(async () => {
               </div>
             </el-tab-pane>
             <el-tab-pane label="eSIM" name="esim" lazy>
-              <DeviceEsimTab :device-id="selectedDevice.id" :device-imei="selectedDevice.modem?.imei || ''" :is-active="activeTab === 'esim'" :device-online="selectedDevice.running === true" />
+              <DeviceEsimTab
+                :device-id="selectedDevice.id"
+                :device-imei="selectedDevice.modem?.imei || ''"
+                :is-active="activeTab === 'esim'"
+                :device-online="selectedDevice.running === true"
+                @edit-policy="openCardPolicyTab"
+              />
             </el-tab-pane>
             <el-tab-pane label="AT 终端" name="at" lazy>
               <DeviceAtTab

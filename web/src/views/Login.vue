@@ -15,6 +15,14 @@ const form = ref({
 
 const loading = ref(false)
 
+function loginErrorMessage(status?: number, message?: string) {
+  const backendMessage = String(message || '').trim()
+  if (status === 401) return backendMessage || '用户名或密码错误'
+  if (!status) return '无法连接服务器，请稍后重试'
+  if (status >= 500) return backendMessage || '无法连接服务器，请稍后重试'
+  return backendMessage || '登录失败，请稍后重试'
+}
+
 async function handleLogin() {
   const { ElMessage } = await import('element-plus')
   if (!form.value.username || !form.value.password) {
@@ -23,12 +31,10 @@ async function handleLogin() {
   }
   
   loading.value = true
-  // Mock delay for feel
-  await new Promise<void>(r => setTimeout(r, 600))
-  const success = await auth.login(form.value.username, form.value.password)
+  const result = await auth.login(form.value.username, form.value.password)
   loading.value = false
 
-  if (success) {
+  if (result.ok) {
     ElMessage.success('欢迎回来')
     const q = typeof route.query.redirect === 'string' ? route.query.redirect : ''
     let redirect = q ? decodeURIComponent(q) : ''
@@ -50,7 +56,7 @@ async function handleLogin() {
       router.push('/')
     }
   } else {
-    ElMessage.error('登录失败，请检查凭证')
+    ElMessage.error(loginErrorMessage(result.error.status, result.error.message))
   }
 }
 </script>

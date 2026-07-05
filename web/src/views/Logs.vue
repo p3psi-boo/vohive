@@ -19,13 +19,11 @@ interface LogEntry {
 const logsStore = useLogsStore()
 const { logs } = storeToRefs(logsStore)
 
-const connected = ref(false)
 const paused = ref(false)
 const autoScroll = ref(true)
 const levelFilter = ref<'all' | 'debug' | 'info' | 'warn' | 'error'>('all')
 const searchQuery = ref('')
 const maxLogs = 1000 // 最大保留日志条数
-const lastConnectError = ref<string>('')
 
 // 日志容器引用
 const logContainer = ref<HTMLElement | null>(null)
@@ -59,10 +57,6 @@ const stream = useEventStream<LogEntry>({
   eventName: 'log',
   query: { level: '' },
   parse: (payload) => JSON.parse(payload) as LogEntry,
-  onConnected: () => {
-    connected.value = true
-    lastConnectError.value = ''
-  },
   onEvent: (entry) => {
     if (paused.value) return
     logsStore.append(entry, maxLogs)
@@ -73,14 +67,15 @@ const stream = useEventStream<LogEntry>({
   }
 })
 
+const connected = stream.connected
+const lastConnectError = stream.lastError
+
 function connect() {
-  connected.value = false
   stream.setPaused(false)
 }
 
 function disconnect() {
   stream.disconnect()
-  connected.value = false
 }
 
 // 暂停/继续
@@ -174,7 +169,7 @@ watch(levelFilter, () => {
         <div class="flex items-center gap-2">
           <el-button @click="togglePause" :type="paused ? 'success' : 'warning'" class="!border-0">
             <el-icon><component :is="paused ? Play24Regular : Pause24Regular" /></el-icon>
-            {{ paused ? '继续' : '暂停' }}
+            {{ paused ? '继续接收' : '暂停接收' }}
           </el-button>
           <el-button @click="clearLogs" class="!border-0">
             <el-icon><Delete24Regular /></el-icon>
@@ -197,11 +192,12 @@ watch(levelFilter, () => {
       <span class="text-sm text-gray-400">{{ logs.length }} 条日志</span>
       <span v-if="!connected && lastConnectError" class="text-sm text-red-500 truncate" :title="lastConnectError">{{ lastConnectError }}</span>
       <div class="flex-1" />
+      <el-button v-if="!connected && !paused" size="small" type="primary" plain @click="connect">重新连接</el-button>
       <el-checkbox v-model="autoScroll" label="自动追尾" />
     </div>
 
     <!-- 过滤器 -->
-    <div class="ui-card p-4 mb-4">
+    <div class="ui-card p-4 mb-4 sticky top-16 z-10">
       <div class="flex flex-wrap items-center gap-4">
         <el-select v-model="levelFilter" placeholder="日志级别" class="w-32">
           <el-option label="全部" value="all" />
@@ -238,7 +234,7 @@ watch(levelFilter, () => {
           <span class="font-bold ml-1 inline-block w-14" :class="getLevelClass(log.level)">{{ log.level.toUpperCase().padEnd(5) }}</span>
           <span class="text-cyan-400 inline-block w-48 truncate align-bottom" :title="log.caller">{{ log.caller }}</span>
           <span class="text-gray-100 ml-1">{{ log.message }}</span>
-          <span v-if="log.fields" class="text-amber-300/70 ml-1">{{ log.fields }}</span>
+          <span v-if="log.fields" class="text-amber-200 dark:text-amber-200 ml-1">{{ log.fields }}</span>
         </div>
       </div>
     </div>

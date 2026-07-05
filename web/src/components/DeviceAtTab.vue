@@ -21,13 +21,13 @@ const atTemplates = AT_TEMPLATES
 const hasATPort = computed(() => String(props.atPort || '').trim().length > 0)
 const canUseATTerminal = computed(() => Boolean(props.running) && hasATPort.value)
 const unavailableTitle = computed(() => {
-  if (!props.running) return '当前设备未运行'
+  if (!props.running) return '设备当前未运行'
   if (!hasATPort.value) return '当前设备没有可用 AT 口'
   return 'AT 终端暂不可用'
 })
 const unavailableDescription = computed(() => {
   if (!props.running) {
-    return '设备当前未启动，AT 终端暂时不可用。待设备运行后，如果存在可用的 AT 口，即可在这里直接发送 AT 指令。'
+    return '设备当前未运行，AT 终端暂时不可用。待设备运行后，如果存在可用的 AT 口，即可在这里直接发送 AT 指令。'
   }
   if (!hasATPort.value && props.backendMode === 'qmi') {
     return '设备当前处于纯 QMI 模式，但没有解析到可用的 AT 口，因此无法提供 AT 串口终端。'

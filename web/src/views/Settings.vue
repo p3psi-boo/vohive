@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { onBeforeRouteLeave } from 'vue-router'
 import { storeToRefs } from 'pinia'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { useSettingsStore } from '../stores/settings'
@@ -16,10 +17,85 @@ import {
 } from '@vicons/fluent'
 
 const settingsStore = useSettingsStore()
-const { systemInfo, loadingNotifications, savingNotifications, testingWebhook, testingBark, testingEmail, changingPassword, passwordForm, telegramForm, feishuForm, qqForm, webhookSettings, barkSettings, emailForm, pushplusForm } = storeToRefs(settingsStore)
+const {
+  systemInfo,
+  loadingNotifications,
+  savingNotifications,
+  testingTelegram,
+  testingFeishu,
+  testingQQ,
+  testingPushplus,
+  testingWebhook,
+  testingBark,
+  testingEmail,
+  changingPassword,
+  passwordForm,
+  telegramForm,
+  feishuForm,
+  qqForm,
+  webhookSettings,
+  barkSettings,
+  emailForm,
+  pushplusForm
+} = storeToRefs(settingsStore)
 const activeNotifyTab = ref('telegram')
+const notificationBaseline = ref('')
 
+function sortedRecord(input: Record<string, string> | undefined) {
+  const out: Record<string, string> = {}
+  for (const key of Object.keys(input || {}).sort()) {
+    out[key] = String(input?.[key] ?? '')
+  }
+  return out
+}
 
+function notificationsSnapshot() {
+  return JSON.stringify({
+    telegram: telegramForm.value,
+    feishu: feishuForm.value,
+    qq: qqForm.value,
+    webhook: {
+      ...webhookSettings.value,
+      urls: Array.isArray(webhookSettings.value.urls) ? [...webhookSettings.value.urls] : [],
+      headers: sortedRecord(webhookSettings.value.headers)
+    },
+    bark: {
+      ...barkSettings.value,
+      urls: Array.isArray(barkSettings.value.urls) ? [...barkSettings.value.urls] : []
+    },
+    email: emailForm.value,
+    pushplus: pushplusForm.value
+  })
+}
+
+function markNotificationsClean() {
+  notificationBaseline.value = notificationsSnapshot()
+}
+
+const notificationsDirty = computed(() => {
+  if (!notificationBaseline.value || loadingNotifications.value) return false
+  return notificationsSnapshot() !== notificationBaseline.value
+})
+
+const hasValidTelegramConfig = computed(() => {
+  return !!(telegramForm.value.bot_token && telegramForm.value.chat_id)
+})
+
+const hasValidFeishuConfig = computed(() => {
+  return !!(feishuForm.value.app_id && feishuForm.value.app_secret && feishuForm.value.chat_ids)
+})
+
+const hasValidQQConfig = computed(() => {
+  return !!(
+    qqForm.value.app_id &&
+    qqForm.value.app_secret &&
+    (qqForm.value.group_ids || qqForm.value.direct_ids)
+  )
+})
+
+const hasValidPushplusConfig = computed(() => {
+  return !!pushplusForm.value.token
+})
 
 const hasValidWebhookURLs = computed(() => {
   if (!Array.isArray(webhookSettings.value.urls)) {
@@ -76,6 +152,7 @@ async function loadNotifications() {
     const result = await settingsStore.fetchNotifications()
     if (!result.ok) throw new Error(result.error.message || '通知配置加载失败')
     syncWebhookHeaderRowsFromSettings()
+    markNotificationsClean()
   } catch {
     ElMessage.error('通知配置加载失败')
   }
@@ -99,10 +176,67 @@ async function saveNotifications() {
     if (applied === false && warning) {
       ElMessage.warning(warning)
     } else {
-      ElMessage.success('通知配置已保存（已写入 config.yaml）')
+      ElMessage.success('通知配置已保存')
     }
+    markNotificationsClean()
   } catch (e: unknown) {
     ElMessage.error(e instanceof Error ? e.message : '通知配置保存失败')
+  }
+}
+
+function showSimpleTestResult(channel: string, data: { ok: boolean; message: string }) {
+  if (data.ok) {
+    ElMessage.success(data.message || '测试通知已发送')
+    return
+  }
+  ElMessage.error(data.message || `${channel} 测试失败`)
+}
+
+async function testTelegramNotification() {
+  try {
+    const result = await settingsStore.testTelegramFromForm()
+    if (!result.ok) {
+      throw new Error(result.error.message || 'Telegram 测试失败')
+    }
+    showSimpleTestResult('Telegram', result.data)
+  } catch (e: unknown) {
+    ElMessage.error(e instanceof Error ? e.message : 'Telegram 测试失败')
+  }
+}
+
+async function testFeishuNotification() {
+  try {
+    const result = await settingsStore.testFeishuFromForm()
+    if (!result.ok) {
+      throw new Error(result.error.message || '飞书测试失败')
+    }
+    showSimpleTestResult('飞书', result.data)
+  } catch (e: unknown) {
+    ElMessage.error(e instanceof Error ? e.message : '飞书测试失败')
+  }
+}
+
+async function testQQNotification() {
+  try {
+    const result = await settingsStore.testQQFromForm()
+    if (!result.ok) {
+      throw new Error(result.error.message || 'QQ 测试失败')
+    }
+    showSimpleTestResult('QQ', result.data)
+  } catch (e: unknown) {
+    ElMessage.error(e instanceof Error ? e.message : 'QQ 测试失败')
+  }
+}
+
+async function testPushplusNotification() {
+  try {
+    const result = await settingsStore.testPushplusFromForm()
+    if (!result.ok) {
+      throw new Error(result.error.message || 'Pushplus 测试失败')
+    }
+    showSimpleTestResult('Pushplus', result.data)
+  } catch (e: unknown) {
+    ElMessage.error(e instanceof Error ? e.message : 'Pushplus 测试失败')
   }
 }
 
@@ -311,6 +445,20 @@ onMounted(() => {
 
 onBeforeUnmount(() => {
 })
+
+onBeforeRouteLeave(async () => {
+  if (!notificationsDirty.value) return true
+  const confirmed = await ElMessageBox.confirm(
+    '通知配置有未保存的修改，离开后这些修改会丢失。确定离开？',
+    '未保存的通知配置',
+    {
+      confirmButtonText: '离开',
+      cancelButtonText: '继续编辑',
+      type: 'warning'
+    }
+  ).then(() => true).catch(() => false)
+  return confirmed
+})
 </script>
 
 <template>
@@ -442,10 +590,19 @@ onBeforeUnmount(() => {
                   <p class="text-xs text-gray-500">Telegram / 飞书 / QQ / Webhook</p>
                </div>
             </div>
-            <el-button type="primary" :loading="savingNotifications" :disabled="loadingNotifications" @click="saveNotifications" class="!border-0">
+            <div class="flex items-center gap-2">
+              <el-tag v-if="notificationsDirty" type="warning" effect="light">未保存</el-tag>
+              <el-button
+                type="primary"
+                :loading="savingNotifications"
+                :disabled="loadingNotifications || !notificationsDirty"
+                @click="saveNotifications"
+                class="!border-0"
+              >
               <el-icon><Save24Regular /></el-icon>
-              保存通知配置
-            </el-button>
+                {{ notificationsDirty ? '保存通知配置' : '已保存' }}
+              </el-button>
+            </div>
          </div>
 
          <div v-if="loadingNotifications" class="p-6 text-sm text-gray-500 dark:text-gray-400">正在加载通知配置…</div>
@@ -453,26 +610,38 @@ onBeforeUnmount(() => {
          <div v-else class="relative z-10 w-full overflow-hidden">
             <el-tabs v-model="activeNotifyTab" class="settings-notify-tabs">
               <!-- Telegram -->
-              <el-tab-pane label="Telegram Bot" name="telegram" class="pt-2">
+              <el-tab-pane label="Telegram 机器人" name="telegram" class="pt-2">
                 <div class="flex items-center justify-between mb-4">
                   <div class="flex items-center gap-2">
                     <div class="font-bold text-gray-800 dark:text-gray-100">启用 Telegram 机器人</div>
                   </div>
-                  <el-switch v-model="telegramForm.enabled" />
+                  <div class="flex items-center gap-2">
+                    <el-button
+                      size="small"
+                      type="primary"
+                      plain
+                      :loading="testingTelegram"
+                      :disabled="!telegramForm.enabled || !hasValidTelegramConfig"
+                      @click="testTelegramNotification"
+                    >
+                      测试通知
+                    </el-button>
+                    <el-switch v-model="telegramForm.enabled" />
+                  </div>
                 </div>
 
                 <div class="space-y-4">
                   <div class="space-y-1">
-                    <label class="text-xs font-bold text-gray-500 uppercase tracking-wider">Bot Token</label>
+                    <label class="text-xs font-bold text-gray-500 uppercase tracking-wider">机器人令牌（Bot Token）</label>
                     <el-input v-model="telegramForm.bot_token" :disabled="!telegramForm.enabled" placeholder="xxxx:yyyy" />
                   </div>
                   <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
                     <div class="space-y-1">
-                      <label class="text-xs font-bold text-gray-500 uppercase tracking-wider">Chat ID</label>
+                      <label class="text-xs font-bold text-gray-500 uppercase tracking-wider">会话 ID（Chat ID）</label>
                       <el-input v-model="telegramForm.chat_id" :disabled="!telegramForm.enabled" type="number" inputmode="numeric" placeholder="例如 123456" />
                     </div>
                     <div class="space-y-1">
-                      <label class="text-xs font-bold text-gray-500 uppercase tracking-wider">Admin ID</label>
+                      <label class="text-xs font-bold text-gray-500 uppercase tracking-wider">管理员 ID（Admin ID）</label>
                       <el-input v-model="telegramForm.admin_id" :disabled="!telegramForm.enabled" type="number" inputmode="numeric" placeholder="例如 123456" />
                     </div>
                   </div>
@@ -490,27 +659,39 @@ onBeforeUnmount(() => {
               </el-tab-pane>
 
               <!-- 飞书 -->
-              <el-tab-pane label="飞书 Bot" name="feishu" class="pt-2">
+              <el-tab-pane label="飞书机器人" name="feishu" class="pt-2">
                 <div class="flex items-center justify-between mb-4">
                   <div class="flex items-center gap-2">
                     <div class="font-bold text-gray-800 dark:text-gray-100">启用飞书机器人</div>
                   </div>
-                  <el-switch v-model="feishuForm.enabled" />
+                  <div class="flex items-center gap-2">
+                    <el-button
+                      size="small"
+                      type="primary"
+                      plain
+                      :loading="testingFeishu"
+                      :disabled="!feishuForm.enabled || !hasValidFeishuConfig"
+                      @click="testFeishuNotification"
+                    >
+                      测试通知
+                    </el-button>
+                    <el-switch v-model="feishuForm.enabled" />
+                  </div>
                 </div>
 
                 <div class="space-y-4">
                   <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
                     <div class="space-y-1">
-                      <label class="text-xs font-bold text-gray-500 uppercase tracking-wider">App ID</label>
+                      <label class="text-xs font-bold text-gray-500 uppercase tracking-wider">应用 ID（App ID）</label>
                       <el-input v-model="feishuForm.app_id" :disabled="!feishuForm.enabled" placeholder="cli_xxxx" />
                     </div>
                     <div class="space-y-1">
-                      <label class="text-xs font-bold text-gray-500 uppercase tracking-wider">App Secret</label>
+                      <label class="text-xs font-bold text-gray-500 uppercase tracking-wider">应用密钥（App Secret）</label>
                       <el-input v-model="feishuForm.app_secret" :disabled="!feishuForm.enabled" type="password" show-password placeholder="••••••••" />
                     </div>
                   </div>
                   <div class="space-y-1">
-                    <label class="text-xs font-bold text-gray-500 uppercase tracking-wider">Chat IDs</label>
+                    <label class="text-xs font-bold text-gray-500 uppercase tracking-wider">会话 ID 列表（Chat IDs）</label>
                     <el-input v-model="feishuForm.chat_ids" :disabled="!feishuForm.enabled" placeholder="多个群组用英文逗号分隔" />
                     <div class="text-[10px] text-gray-400 mt-1">飞书群聊的 Chat ID (oc_xxxx)，可通过飞书开放平台 API 获取，支持逗号分隔多个群组。</div>
                   </div>
@@ -526,32 +707,44 @@ onBeforeUnmount(() => {
               </el-tab-pane>
 
               <!-- QQ -->
-              <el-tab-pane label="QQ Bot" name="qq" class="pt-2">
+              <el-tab-pane label="QQ 机器人" name="qq" class="pt-2">
                 <div class="flex items-center justify-between mb-4">
                   <div class="flex items-center gap-2">
                     <div class="font-bold text-gray-800 dark:text-gray-100">启用 QQ 机器人</div>
                   </div>
-                  <el-switch v-model="qqForm.enabled" />
+                  <div class="flex items-center gap-2">
+                    <el-button
+                      size="small"
+                      type="primary"
+                      plain
+                      :loading="testingQQ"
+                      :disabled="!qqForm.enabled || !hasValidQQConfig"
+                      @click="testQQNotification"
+                    >
+                      测试通知
+                    </el-button>
+                    <el-switch v-model="qqForm.enabled" />
+                  </div>
                 </div>
 
                 <div class="space-y-4">
                   <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
                     <div class="space-y-1">
-                      <label class="text-xs font-bold text-gray-500 uppercase tracking-wider">App ID</label>
+                      <label class="text-xs font-bold text-gray-500 uppercase tracking-wider">应用 ID（App ID）</label>
                       <el-input v-model="qqForm.app_id" :disabled="!qqForm.enabled" placeholder="QQ Bot App ID" />
                     </div>
                     <div class="space-y-1">
-                      <label class="text-xs font-bold text-gray-500 uppercase tracking-wider">App Secret</label>
+                      <label class="text-xs font-bold text-gray-500 uppercase tracking-wider">应用密钥（App Secret）</label>
                       <el-input v-model="qqForm.app_secret" :disabled="!qqForm.enabled" type="password" show-password placeholder="••••••••" />
                     </div>
                   </div>
                   <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
                     <div class="space-y-1">
-                      <label class="text-xs font-bold text-gray-500 uppercase tracking-wider">Group IDs (群聊)</label>
+                      <label class="text-xs font-bold text-gray-500 uppercase tracking-wider">群聊 ID 列表（Group IDs）</label>
                       <el-input v-model="qqForm.group_ids" :disabled="!qqForm.enabled" placeholder="群聊 OpenID，多个使用逗号分隔" />
                     </div>
                     <div class="space-y-1">
-                      <label class="text-xs font-bold text-gray-500 uppercase tracking-wider">User IDs (私聊)</label>
+                      <label class="text-xs font-bold text-gray-500 uppercase tracking-wider">私聊用户 ID 列表（User IDs）</label>
                       <el-input v-model="qqForm.direct_ids" :disabled="!qqForm.enabled" placeholder="用户 OpenID，多个使用逗号分隔" />
                     </div>
                   </div>
@@ -588,7 +781,7 @@ onBeforeUnmount(() => {
                 <div class="space-y-4">
                   <div class="space-y-2">
                     <div class="flex items-center justify-between">
-                      <label class="text-xs font-bold text-gray-500 uppercase tracking-wider">目标 URLs</label>
+                      <label class="text-xs font-bold text-gray-500 uppercase tracking-wider">目标 URL 列表</label>
                       <el-button size="small" type="primary" plain @click="addBarkUrl" :disabled="!barkSettings.enabled">
                          <el-icon><Add20Regular /></el-icon>
                          <span class="ml-1">添加 URL</span>
@@ -608,13 +801,13 @@ onBeforeUnmount(() => {
                   </div>
 
                   <div class="space-y-1">
-                    <label class="text-xs font-bold text-gray-500 uppercase tracking-wider">分组 (Group)</label>
+                    <label class="text-xs font-bold text-gray-500 uppercase tracking-wider">分组（Group）</label>
                     <el-input v-model="barkSettings.group" :disabled="!barkSettings.enabled" placeholder="例如 vohive" />
                     <div class="text-[10px] text-gray-400 mt-1">iOS 设备上的通知分组。</div>
                   </div>
 
                   <div class="space-y-1">
-                    <label class="text-xs font-bold text-gray-500 uppercase tracking-wider">通知级别 (Level)</label>
+                    <label class="text-xs font-bold text-gray-500 uppercase tracking-wider">通知级别（Level）</label>
                     <el-select v-model="barkSettings.level" :disabled="!barkSettings.enabled" placeholder="选择通知级别" class="w-full">
                       <el-option label="时效性 (timeSensitive)" value="timeSensitive" />
                       <el-option label="积极 (active)" value="active" />
@@ -624,17 +817,17 @@ onBeforeUnmount(() => {
                   </div>
 
                   <div class="space-y-1">
-                    <label class="text-xs font-bold text-gray-500 uppercase tracking-wider">图标 (Icon)</label>
+                    <label class="text-xs font-bold text-gray-500 uppercase tracking-wider">图标（Icon）</label>
                     <el-input v-model="barkSettings.icon" :disabled="!barkSettings.enabled" placeholder="图标 URL，可选" />
                   </div>
                 </div>
               </el-tab-pane>
 
               <!-- Email -->
-              <el-tab-pane label="Email" name="email" class="pt-2">
+              <el-tab-pane label="邮件" name="email" class="pt-2">
                 <div class="flex items-center justify-between mb-4">
                   <div class="flex items-center gap-2">
-                    <div class="font-bold text-gray-800 dark:text-gray-100">启用 Email 推送</div>
+                    <div class="font-bold text-gray-800 dark:text-gray-100">启用邮件推送</div>
                   </div>
                   <div class="flex items-center gap-2">
                     <el-button
@@ -670,20 +863,20 @@ onBeforeUnmount(() => {
                   </div>
                   <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
                     <div class="space-y-1">
-                      <label class="text-xs font-bold text-gray-500 uppercase tracking-wider">用户名 (Username)</label>
+                      <label class="text-xs font-bold text-gray-500 uppercase tracking-wider">用户名</label>
                       <el-input v-model="emailForm.username" :disabled="!emailForm.enabled" placeholder="邮箱账号" />
                     </div>
                     <div class="space-y-1">
-                      <label class="text-xs font-bold text-gray-500 uppercase tracking-wider">密码 (Password)</label>
+                      <label class="text-xs font-bold text-gray-500 uppercase tracking-wider">密码</label>
                       <el-input v-model="emailForm.password" :disabled="!emailForm.enabled" type="password" show-password placeholder="邮箱密码或授权码" />
                     </div>
                   </div>
                   <div class="space-y-1">
-                    <label class="text-xs font-bold text-gray-500 uppercase tracking-wider">发件人地址 (From)</label>
+                    <label class="text-xs font-bold text-gray-500 uppercase tracking-wider">发件人地址</label>
                     <el-input v-model="emailForm.from_address" :disabled="!emailForm.enabled" placeholder="例如 noreply@example.com" />
                   </div>
                   <div class="space-y-1">
-                    <label class="text-xs font-bold text-gray-500 uppercase tracking-wider">收件人地址 (To)</label>
+                    <label class="text-xs font-bold text-gray-500 uppercase tracking-wider">收件人地址</label>
                     <el-input v-model="emailForm.to_addresses" :disabled="!emailForm.enabled" placeholder="多个收件人请用英文逗号分隔" />
                   </div>
                 </div>
@@ -695,20 +888,32 @@ onBeforeUnmount(() => {
                   <div class="flex items-center gap-2">
                     <div class="font-bold text-gray-800 dark:text-gray-100">启用 Pushplus 推送</div>
                   </div>
-                  <el-switch v-model="pushplusForm.enabled" />
+                  <div class="flex items-center gap-2">
+                    <el-button
+                      size="small"
+                      type="primary"
+                      plain
+                      :loading="testingPushplus"
+                      :disabled="!pushplusForm.enabled || !hasValidPushplusConfig"
+                      @click="testPushplusNotification"
+                    >
+                      测试通知
+                    </el-button>
+                    <el-switch v-model="pushplusForm.enabled" />
+                  </div>
                 </div>
 
                 <div class="space-y-4">
                   <div class="space-y-1">
-                    <label class="text-xs font-bold text-gray-500 uppercase tracking-wider">Token</label>
+                    <label class="text-xs font-bold text-gray-500 uppercase tracking-wider">令牌（Token）</label>
                     <el-input v-model="pushplusForm.token" :disabled="!pushplusForm.enabled" placeholder="Pushplus 用户的 Token" />
                   </div>
                   <div class="space-y-1">
-                    <label class="text-xs font-bold text-gray-500 uppercase tracking-wider">群组编码 (Topic)</label>
+                    <label class="text-xs font-bold text-gray-500 uppercase tracking-wider">群组编码（Topic）</label>
                     <el-input v-model="pushplusForm.topic" :disabled="!pushplusForm.enabled" placeholder="群组编码，不填则发给个人" />
                   </div>
                   <div class="space-y-1">
-                    <label class="text-xs font-bold text-gray-500 uppercase tracking-wider">渠道 (Channel)</label>
+                    <label class="text-xs font-bold text-gray-500 uppercase tracking-wider">渠道（Channel）</label>
                     <el-select v-model="pushplusForm.channel" :disabled="!pushplusForm.enabled" placeholder="选择渠道" class="w-full">
                       <el-option label="微信 (wechat)" value="wechat" />
                       <el-option label="Webhook (webhook)" value="webhook" />
@@ -743,7 +948,7 @@ onBeforeUnmount(() => {
                 <div class="space-y-4">
                   <div class="space-y-2">
                     <div class="flex items-center justify-between">
-                      <label class="text-xs font-bold text-gray-500 uppercase tracking-wider">目标 URLs</label>
+                    <label class="text-xs font-bold text-gray-500 uppercase tracking-wider">目标 URL 列表</label>
                       <el-button size="small" type="primary" plain @click="addWebhookUrl" :disabled="!webhookSettings.enabled">
                          <el-icon><Add20Regular /></el-icon>
                          <span class="ml-1">添加 URL</span>
@@ -765,14 +970,14 @@ onBeforeUnmount(() => {
                   </div>
 
                   <div class="space-y-1">
-                    <label class="text-xs font-bold text-gray-500 uppercase tracking-wider">数字签名密钥 (Secret)</label>
+                    <label class="text-xs font-bold text-gray-500 uppercase tracking-wider">数字签名密钥（Secret）</label>
                     <el-input v-model="webhookSettings.secret" :disabled="!webhookSettings.enabled" placeholder="用于 HMAC-SHA256 签名，选填" />
                     <div class="text-[10px] text-gray-400 mt-1">若配置，将通过请求头 X-Vohive-Signature 提供 payload 验证。</div>
                   </div>
 
                   <div class="space-y-2">
                     <div class="flex items-center justify-between">
-                      <label class="text-xs font-bold text-gray-500 uppercase tracking-wider">自定义请求头 (Headers)</label>
+                      <label class="text-xs font-bold text-gray-500 uppercase tracking-wider">自定义请求头（Headers）</label>
                       <el-button size="small" type="primary" plain @click="addWebhookHeader" :disabled="!webhookSettings.enabled">
                         <el-icon><Add20Regular /></el-icon>
                         <span class="ml-1">添加 Header</span>
@@ -806,7 +1011,7 @@ onBeforeUnmount(() => {
                   </div>
 
                   <div class="space-y-1">
-                    <label class="text-xs font-bold text-gray-500 uppercase tracking-wider">文本模板 (Text Template)</label>
+                    <label class="text-xs font-bold text-gray-500 uppercase tracking-wider">文本模板（Text Template）</label>
                     <el-input
                       v-model="webhookSettings.text_template"
                       :disabled="!webhookSettings.enabled"
@@ -821,7 +1026,7 @@ onBeforeUnmount(() => {
                   
                   <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
                     <div class="space-y-1">
-                      <label class="text-xs font-bold text-gray-500 uppercase tracking-wider">请求超时 (ms)</label>
+                      <label class="text-xs font-bold text-gray-500 uppercase tracking-wider">请求超时（毫秒）</label>
                       <el-input-number v-model="webhookSettings.timeout_ms" :min="1000" :max="60000" :disabled="!webhookSettings.enabled" class="w-full !w-full" controls-position="right" />
                     </div>
                     <div class="space-y-1">

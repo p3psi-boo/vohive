@@ -11,7 +11,8 @@ import {
   type WebhookSettings,
   type BarkSettings,
   type TestBarkResponse,
-  type TestEmailResponse
+  type TestEmailResponse,
+  type TestSimpleNotificationResponse
 } from '../services/system'
 
 const DEFAULT_SYSTEM_INFO: SystemInfo = {
@@ -169,6 +170,10 @@ export const useSettingsStore = defineStore('settings', () => {
   const loadingSystemInfo = ref(false)
   const loadingNotifications = ref(false)
   const savingNotifications = ref(false)
+  const testingTelegram = ref(false)
+  const testingFeishu = ref(false)
+  const testingQQ = ref(false)
+  const testingPushplus = ref(false)
   const testingWebhook = ref(false)
   const testingBark = ref(false)
   const testingEmail = ref(false)
@@ -338,6 +343,75 @@ export const useSettingsStore = defineStore('settings', () => {
     return saveNotifications(buildNotificationsPayload())
   }
 
+  async function testTelegramFromForm() {
+    testingTelegram.value = true
+    const payload = {
+      enabled: !!telegramForm.value.enabled,
+      bot_token: String(telegramForm.value.bot_token || '').trim(),
+      chat_id: Number(telegramForm.value.chat_id) || 0,
+      admin_id: Number(telegramForm.value.admin_id) || 0,
+      base_url: String(telegramForm.value.base_url || '').trim(),
+      proxy: String(telegramForm.value.proxy || '').trim()
+    }
+    const result = await systemService.testTelegram(payload)
+    if (!result.ok) {
+      error.value = result.error
+    }
+    testingTelegram.value = false
+    return result as { ok: true; data: TestSimpleNotificationResponse } | { ok: false; error: AppError }
+  }
+
+  async function testFeishuFromForm() {
+    testingFeishu.value = true
+    const payload = {
+      enabled: !!feishuForm.value.enabled,
+      app_id: String(feishuForm.value.app_id || '').trim(),
+      app_secret: String(feishuForm.value.app_secret || '').trim(),
+      chat_ids: feishuForm.value.chat_ids
+        ? feishuForm.value.chat_ids.split(',').map(s => s.trim()).filter(Boolean)
+        : []
+    }
+    const result = await systemService.testFeishu(payload)
+    if (!result.ok) {
+      error.value = result.error
+    }
+    testingFeishu.value = false
+    return result as { ok: true; data: TestSimpleNotificationResponse } | { ok: false; error: AppError }
+  }
+
+  async function testQQFromForm() {
+    testingQQ.value = true
+    const payload = {
+      enabled: !!qqForm.value.enabled,
+      app_id: String(qqForm.value.app_id || '').trim(),
+      app_secret: String(qqForm.value.app_secret || '').trim(),
+      group_ids: String(qqForm.value.group_ids || '').trim(),
+      direct_ids: String(qqForm.value.direct_ids || '').trim()
+    }
+    const result = await systemService.testQQ(payload)
+    if (!result.ok) {
+      error.value = result.error
+    }
+    testingQQ.value = false
+    return result as { ok: true; data: TestSimpleNotificationResponse } | { ok: false; error: AppError }
+  }
+
+  async function testPushplusFromForm() {
+    testingPushplus.value = true
+    const payload = {
+      enabled: !!pushplusForm.value.enabled,
+      token: String(pushplusForm.value.token || '').trim(),
+      topic: String(pushplusForm.value.topic || '').trim(),
+      channel: String(pushplusForm.value.channel || '').trim()
+    }
+    const result = await systemService.testPushplus(payload)
+    if (!result.ok) {
+      error.value = result.error
+    }
+    testingPushplus.value = false
+    return result as { ok: true; data: TestSimpleNotificationResponse } | { ok: false; error: AppError }
+  }
+
   async function testWebhookFromForm() {
     testingWebhook.value = true
     const payload = {
@@ -432,6 +506,10 @@ export const useSettingsStore = defineStore('settings', () => {
     loadingSystemInfo,
     loadingNotifications,
     savingNotifications,
+    testingTelegram,
+    testingFeishu,
+    testingQQ,
+    testingPushplus,
     testingWebhook,
     testingBark,
     testingEmail,
@@ -441,6 +519,10 @@ export const useSettingsStore = defineStore('settings', () => {
     fetchNotifications,
     saveNotifications,
     saveNotificationsFromForms,
+    testTelegramFromForm,
+    testFeishuFromForm,
+    testQQFromForm,
+    testPushplusFromForm,
     testWebhookFromForm,
     testBarkFromForm,
     testEmailFromForm,

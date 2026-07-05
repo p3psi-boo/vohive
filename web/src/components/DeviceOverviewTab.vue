@@ -320,12 +320,18 @@ const networkPanelMessage = computed(() => {
     <div class="ui-panel-muted p-4 relative min-w-0 overflow-hidden">
       <div class="flex items-center justify-between mb-2">
         <div class="text-xs font-bold text-gray-500 uppercase tracking-wider">SIM / 设备</div>
-        <div class="text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 cursor-pointer -mt-1 -mr-1" @click="showSensitive = !showSensitive">
-          <el-icon size="18">
-            <Eye24Regular v-if="showSensitive" />
-            <EyeOff24Regular v-else />
-          </el-icon>
-        </div>
+        <el-tooltip :content="showSensitive ? '全局隐藏敏感信息' : '全局显示敏感信息'" placement="top">
+          <button
+            type="button"
+            class="text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 cursor-pointer -mt-1 -mr-1"
+            @click="showSensitive = !showSensitive"
+          >
+            <el-icon size="18">
+              <Eye24Regular v-if="showSensitive" />
+              <EyeOff24Regular v-else />
+            </el-icon>
+          </button>
+        </el-tooltip>
       </div>
       <div class="text-sm space-y-1.5 text-gray-700 dark:text-gray-200">
         <FieldRow label="IMEI"      :value="device?.modem?.imei"   :sensitive="!showSensitive" monospace copyable />

@@ -1,6 +1,8 @@
 import { defineStore } from 'pinia'
 import axios, { type AxiosInstance } from 'axios'
 import { debugCollector } from '../debug/collector'
+import { fail, ok } from '../types/domain'
+import { toAppError } from '../services/http'
 
 export const api: AxiosInstance = axios.create({
   baseURL: '/api'
@@ -36,10 +38,10 @@ export const useAuthStore = defineStore('auth', {
         this.token = token
         localStorage.setItem('token', token)
         api.defaults.headers.common.Authorization = `Bearer ${token}`
-        return true
+        return ok(true)
       } catch (e) {
         console.error(e)
-        return false
+        return fail(toAppError(e))
       }
     },
     logout() {

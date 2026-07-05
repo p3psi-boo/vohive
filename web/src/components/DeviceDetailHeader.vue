@@ -42,7 +42,7 @@ const emit = defineEmits<{
         </el-button>
         <el-button v-else :loading="rotating" :disabled="!device?.network_connected" @click="emit('rotate-ip')" class="ui-glass-border !border-0">
           <el-icon><ArrowSync24Regular /></el-icon>
-          切换 IP
+          IP 轮换
         </el-button>
         <el-button :loading="rebooting" @click="emit('reboot-modem')" class="ui-glass-border !border-0 hover:!text-red-600">
           <el-icon><Power24Regular /></el-icon>

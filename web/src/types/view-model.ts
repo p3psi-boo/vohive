@@ -15,6 +15,8 @@ export type SmsThreadVM = {
   deviceId?: string
   lastTs: number
   lastSmsId: number
+  lastType: number
+  unreadCount: number
   lastMessage: string
   lastDeviceName?: string
   localPhone?: string

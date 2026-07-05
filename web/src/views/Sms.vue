@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { ElMessage, ElMessageBox } from 'element-plus'
+import { ElMessage, ElMessageBox, ElNotification } from 'element-plus'
 import { Loading } from '@element-plus/icons-vue'
 import { useSMSStore } from '../stores/sms'
 import { usePollingScheduler } from '../composables/usePollingScheduler'
@@ -24,6 +24,8 @@ type SmsThread = {
   deviceId?: string
   lastTs: number
   lastSmsId: number
+  lastType: number
+  unreadCount: number
   lastMessage: string
   lastDeviceName?: string
   localPhone?: string
@@ -43,6 +45,8 @@ const loading = ref(false)
 const threads = ref<SmsThread[]>([])
 const messagesLastOkAt = ref<number | null>(null)
 const messagesError = ref<{ message: string; status?: number; method?: string; url?: string } | null>(null)
+const threadSnapshot = ref<Record<string, { lastSmsId: number; lastTs: number; lastType: number }>>({})
+const threadSnapshotReady = ref(false)
 
 const selectedDevice = ref<string>(typeof route.query.device === 'string' ? route.query.device : 'all')
 const selectedThreadKey = ref<string>(typeof route.query.contact === 'string' ? route.query.contact : '')
@@ -72,6 +76,10 @@ function dateKey(ms: number) {
   return `${t.getFullYear()}-${String(t.getMonth() + 1).padStart(2, '0')}-${String(t.getDate()).padStart(2, '0')}`
 }
 
+function deleteButtonPosition(message: SMSMessage) {
+  return message.type === 2 && message.device_name ? 'before-device' : 'after-meta'
+}
+
 function lastSeenKey(threadKey: string) {
   return `sms_thread_last_seen:${selectedDevice.value}:${threadKey}`
 }
@@ -87,7 +95,9 @@ function getLastSeen(threadKey: string) {
 
 function setLastSeen(threadKey: string, ts: number) {
   try {
-    localStorage.setItem(lastSeenKey(threadKey), String(ts || Date.now()))
+    const value = String(ts || Date.now())
+    localStorage.setItem(lastSeenKey(threadKey), value)
+    localStorage.setItem(`sms_thread_last_seen:all:${threadKey}`, value)
   } catch {
     // Ignore storage write failures in private/sandboxed modes.
   }
@@ -219,7 +229,40 @@ function markThreadSeen(t: SmsThread | null) {
 }
 
 function isUnread(t: SmsThread) {
-  return t.lastTs > getLastSeen(t.key)
+  return t.lastType === 1 && t.lastTs > getLastSeen(t.key)
+}
+
+function snapshotThreads(list: SmsThread[]) {
+  const next: Record<string, { lastSmsId: number; lastTs: number; lastType: number }> = {}
+  for (const thread of list) {
+    next[thread.key] = {
+      lastSmsId: thread.lastSmsId,
+      lastTs: thread.lastTs,
+      lastType: thread.lastType
+    }
+  }
+  return next
+}
+
+function notifyNewIncomingThreads(list: SmsThread[]) {
+  if (!threadSnapshotReady.value) return
+  const previous = threadSnapshot.value
+  for (const thread of list) {
+    const before = previous[thread.key]
+    if (!before) continue
+    if (thread.lastType !== 1) continue
+    if (thread.lastSmsId <= before.lastSmsId) continue
+    if (thread.key === selectedThreadKey.value) continue
+    ElNotification({
+      title: '收到新短信',
+      message: `${thread.peer}: ${thread.lastMessage || '新消息'}`,
+      type: 'info',
+      duration: 6000,
+      onClick: () => {
+        void selectThread(thread.key, { syncRoute: true, scrollToBottom: true })
+      }
+    })
+  }
 }
 
 function backToList() {
@@ -403,7 +446,11 @@ async function fetchMessages(silent = false) {
   const result = await smsStore.fetchThreads(selectedDevice.value)
   if (seq !== messagesFetchSeq) return false
   if (result.ok) {
-    threads.value = (result.data || []) as SmsThread[]
+    const nextThreads = (result.data || []) as SmsThread[]
+    if (silent) notifyNewIncomingThreads(nextThreads)
+    threads.value = nextThreads
+    threadSnapshot.value = snapshotThreads(nextThreads)
+    threadSnapshotReady.value = true
     messagesLastOkAt.value = Date.now()
   } else {
     messagesError.value = result.error
@@ -651,7 +698,7 @@ async function confirmDeleteMessage(message: SMSMessage) {
   if (!message.id || deletingMessageId.value === message.id) return
   try {
     await ElMessageBox.confirm(
-      '删除后无法恢复。仅删除短信中心历史记录。',
+      '删除后无法恢复；此操作仅删除本系统中的记录，不影响对方手机上的短信。',
       '删除这条短信？',
       {
         confirmButtonText: '删除',
@@ -684,10 +731,10 @@ async function confirmDeleteThread(thread: SmsThread) {
   if (deletingThreadKey.value === thread.key) return
   try {
     await ElMessageBox.confirm(
-      `将删除与 ${thread.peer} 的全部短信历史，无法恢复。仅删除短信中心历史记录。`,
-      '永久删除整个对话？',
+      `将删除与 ${thread.peer} 的全部短信历史，删除后无法恢复；此操作仅删除本系统中的记录，不影响对方手机上的短信。`,
+      '永久删除整个会话？',
       {
-        confirmButtonText: '删除对话',
+        confirmButtonText: '删除会话',
         cancelButtonText: '取消',
         type: 'warning'
       }
@@ -703,7 +750,7 @@ async function confirmDeleteThread(thread: SmsThread) {
       : { device_id: 'all', imsi: thread.imsi, peer: thread.peer }
     const result = await smsStore.deleteThread(payload)
     if (!result.ok) throw new Error(result.error.message || '删除失败')
-    ElMessage.success('已删除对话')
+    ElMessage.success('已删除会话')
     const deletingCurrent = selectedThreadKey.value === thread.key
     if (deletingCurrent) clearSelectedThread(true)
     await fetchMessages(false)
@@ -849,8 +896,8 @@ async function confirmDeleteThread(thread: SmsThread) {
                     size="small"
                     :class="{ 'sms-delete-visible': !supportsHover }"
                     :loading="deletingThreadKey === t.key"
-                    :aria-label="`删除与 ${t.peer} 的对话`"
-                    title="删除对话"
+                    :aria-label="`删除与 ${t.peer} 的会话`"
+                    title="删除会话"
                     @click.stop="void confirmDeleteThread(t)"
                   >
                     <el-icon><Delete24Regular /></el-icon>
@@ -887,7 +934,7 @@ async function confirmDeleteThread(thread: SmsThread) {
           </div>
 
           <div v-if="!selectedThread" class="flex-1 flex items-center justify-center p-6">
-            <EmptyState title="请选择一个会话" subtitle="从左侧联系人列表进入短信明细" />
+            <EmptyState title="请选择一个会话" subtitle="从左侧会话列表进入短信明细" />
           </div>
 
           <div v-else ref="detailScrollbar" class="flex-1 min-h-0 overflow-y-auto sms-detail-scroll" @scroll="onDetailScroll">
@@ -912,7 +959,7 @@ async function confirmDeleteThread(thread: SmsThread) {
                     <div class="flex items-center gap-2 mb-1" :class="m.type === 1 ? '' : 'justify-end'">
                       <span v-if="m.type === 1" class="text-xs font-bold text-gray-700 dark:text-gray-200">{{ m.sender }}</span>
                       <el-button
-                        v-if="!isNarrowLayout && m.type === 2 && m.device_name"
+                        v-if="!isNarrowLayout && deleteButtonPosition(m) === 'before-device'"
                         text
                         class="sms-danger-ghost-btn sms-delete-trigger sms-message-delete-btn"
                         size="small"
@@ -931,7 +978,7 @@ async function confirmDeleteThread(thread: SmsThread) {
                       <span v-if="m.type === 2 && m.status === 2" class="text-green-500 text-xs" title="发送成功">✓</span>
                       <span v-else-if="m.type === 2 && m.status === 3" class="text-red-500 text-xs" title="发送失败">✗</span>
                       <el-button
-                        v-if="!isNarrowLayout && (m.type !== 2 || !m.device_name)"
+                        v-if="!isNarrowLayout && deleteButtonPosition(m) === 'after-meta'"
                         text
                         class="sms-danger-ghost-btn sms-delete-trigger sms-message-delete-btn"
                         size="small"
@@ -989,7 +1036,7 @@ async function confirmDeleteThread(thread: SmsThread) {
           <div class="sms-action-sheet-title">操作</div>
           <el-button class="sms-danger-ghost-btn !w-full !justify-center" @click="void onActionSheetDelete()">
             <el-icon><Delete24Regular /></el-icon>
-            {{ actionSheetTarget?.type === 'thread' ? '删除对话' : '删除短信' }}
+            {{ actionSheetTarget?.type === 'thread' ? '删除会话' : '删除短信' }}
           </el-button>
           <el-button class="!w-full !justify-center" @click="closeActionSheet">取消</el-button>
         </div>

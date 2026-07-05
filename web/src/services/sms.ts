@@ -39,6 +39,8 @@ function normalizeThread(contact: SMSContactDTO): SmsThreadVM {
     deviceId: contact.device_id,
     lastTs: parseTs(contact.last_timestamp),
     lastSmsId: contact.last_sms_id || 0,
+    lastType: contact.last_type || 0,
+    unreadCount: contact.unread_count || 0,
     lastMessage: String(contact.last_content || '').slice(0, 80),
     lastDeviceName: contact.device_name,
     localPhone: contact.local_phone || '',

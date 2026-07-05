@@ -6,6 +6,7 @@ import PageHeader from '../components/PageHeader.vue'
 import EmptyState from '../components/EmptyState.vue'
 import ListSkeleton from '../components/ListSkeleton.vue'
 import ErrorState from '../components/ErrorState.vue'
+import StatusLight from '../components/StatusLight.vue'
 import { usePollingScheduler } from '../composables/usePollingScheduler'
 import { useProxyStore } from '../stores/proxy'
 import { useUpstreamProxyStore } from '../stores/upstream-proxy'
@@ -22,6 +23,7 @@ import {
   ArrowSync24Regular,
   Edit24Regular,
   Delete24Regular,
+  MoreHorizontal24Regular,
   Router24Regular,
   Link24Regular,
   Earth24Regular
@@ -271,8 +273,44 @@ function formatModeLabel(mode: string | undefined) {
   return mode === 'http' ? 'HTTP' : 'SOCKS5'
 }
 
+function outboundStatusTone(inst: ProxyInstance & { status: { running: boolean } }) {
+  if (!inst.enabled) return 'neutral'
+  return inst.status.running ? 'success' : 'danger'
+}
+
+function outboundStatusLabel(inst: ProxyInstance & { status: { running: boolean } }) {
+  if (!inst.enabled) return '已禁用'
+  return inst.status.running ? '运行中' : '已停止'
+}
+
+function upstreamStatusTone(proxy: UpstreamProxy) {
+  return proxy.enabled ? 'success' : 'neutral'
+}
+
+function upstreamStatusLabel(proxy: UpstreamProxy) {
+  return proxy.enabled ? '已启用' : '已禁用'
+}
+
+function handleInstanceMore(command: string) {
+  const [action, id] = command.split(':')
+  if (!id) return
+  if (action === 'restart') {
+    restartInstance(id)
+  } else if (action === 'delete') {
+    deleteInstance(id)
+  }
+}
+
+function handleUpstreamMore(command: string) {
+  const [action, id] = command.split(':')
+  if (action !== 'delete' || !id) return
+  const proxy = upstreamStore.proxies.find(item => item.id === id)
+  if (proxy) deleteUpstream(proxy)
+}
+
 const pollEnabled = computed(() => !initialLoading.value && instances.value.length > 0)
-usePollingScheduler(() => fetchOverview({ silent: true }), 5000, {
+// 出站代理承载运行状态，刷新更频繁；前置代理主要是配置/国家规则，切回 tab 时即时刷新即可。
+const overviewPoll = usePollingScheduler(() => fetchOverview({ silent: true }), 5000, {
   enabled: pollEnabled,
   maxIntervalMs: 60000,
   backgroundIntervalMs: 15000
@@ -463,7 +501,17 @@ async function doUpsertCountryRule() {
   }
 }
 
-async function doDeleteCountryRule(countryCode: string) {
+async function doDeleteCountryRule(country: UpstreamProxyCountry) {
+  const countryCode = country.country_code
+  const countryName = country.country_name || country.country_code
+  const confirmed = await ElMessageBox.confirm(
+    `确定删除「${countryCode} · ${countryName}」的国家规则？删除后该国家流量将恢复直连。`,
+    '确认删除国家规则',
+    { confirmButtonText: '删除规则', cancelButtonText: '取消', type: 'warning' }
+  ).then(() => true).catch(() => false)
+
+  if (!confirmed) return
+
   try {
     const result = await upstreamStore.deleteCountryRule(countryCode)
     if (!result.ok) throw new Error(result.error.message || '删除规则失败')
@@ -489,16 +537,24 @@ onMounted(() => {
 
 // 前置代理轮询
 const upPollEnabled = computed(() => !upstreamLoading.value && activeTab.value === 'upstream')
-usePollingScheduler(() => fetchUpstream({ silent: true }), 10000, {
+const upstreamPoll = usePollingScheduler(() => fetchUpstream({ silent: true }), 10000, {
   enabled: upPollEnabled,
   maxIntervalMs: 60000,
   backgroundIntervalMs: 30000
+})
+
+watch(activeTab, (tab) => {
+  if (tab === 'upstream') {
+    upstreamPoll.trigger()
+  } else if (tab === 'outbound') {
+    overviewPoll.trigger()
+  }
 })
 </script>
 
 <template>
   <div class="max-w-7xl mx-auto">
-    <PageHeader title="代理管理" subtitle="管理本地出站代理和 VoWiFi 漫游前置代理" />
+    <PageHeader title="代理管理" subtitle="管理本地代理实例和 VoWiFi 漫游前置代理" />
 
     <!-- Tab 切换 -->
     <el-tabs v-model="activeTab" class="proxy-tabs mb-4">
@@ -517,7 +573,7 @@ usePollingScheduler(() => fetchUpstream({ silent: true }), 10000, {
         <template #label>
           <div class="flex items-center gap-1.5">
             <el-icon size="16"><Router24Regular /></el-icon>
-            <span class="font-medium">本地出站代理</span>
+            <span class="font-medium">本地代理实例</span>
             <span v-if="instances.length > 0" class="inline-flex items-center justify-center px-1.5 py-0.5 text-[10px] font-bold leading-none text-white bg-blue-500 rounded-full shadow-sm ml-0.5">
               {{ instances.length }}
             </span>
@@ -551,7 +607,7 @@ usePollingScheduler(() => fetchUpstream({ silent: true }), 10000, {
           </div>
           <el-button type="primary" @click="openUpstreamDrawer()" class="!border-0">
             <el-icon class="mr-1.5"><Add24Regular /></el-icon>
-            <span>新增代理</span>
+            <span>新增前置代理</span>
           </el-button>
         </div>
 
@@ -560,7 +616,7 @@ usePollingScheduler(() => fetchUpstream({ silent: true }), 10000, {
         <EmptyState
           v-else-if="upstreamStore.proxies.length === 0"
           title="暂无前置代理"
-          subtitle="点击「新增代理」创建 Socks5 前置代理，再按国家配置 VoWiFi 分流规则；未配置国家默认直连"
+          subtitle="点击「新增前置代理」创建 Socks5 前置代理，再按国家配置 VoWiFi 分流规则；未配置国家默认直连"
         />
 
         <div v-else class="space-y-3">
@@ -570,9 +626,12 @@ usePollingScheduler(() => fetchUpstream({ silent: true }), 10000, {
             class="ui-panel-muted p-4 flex flex-col lg:flex-row lg:items-center lg:justify-between gap-3"
           >
             <div class="flex items-center gap-3 min-w-0">
-              <span class="w-2.5 h-2.5 rounded-full shrink-0" :class="proxy.enabled ? 'bg-green-500' : 'bg-gray-300'" />
+              <StatusLight :tone="upstreamStatusTone(proxy)" />
               <div class="min-w-0">
-                <div class="font-bold text-gray-900 dark:text-white truncate">{{ proxy.name || proxy.id }}</div>
+                <div class="flex items-center gap-2 min-w-0">
+                  <div class="font-bold text-gray-900 dark:text-white truncate">{{ proxy.name || proxy.id }}</div>
+                  <span class="text-[11px] text-gray-400 shrink-0">{{ upstreamStatusLabel(proxy) }}</span>
+                </div>
                 <div class="text-xs text-gray-500 mt-0.5 truncate">
                   Socks5 · <span class="font-mono">{{ proxy.addr }}</span>
                   <span v-if="proxy.username"> · 鉴权: {{ proxy.username }}</span>
@@ -581,10 +640,6 @@ usePollingScheduler(() => fetchUpstream({ silent: true }), 10000, {
             </div>
 
             <div class="flex items-center gap-2 shrink-0 flex-wrap">
-              <el-tag size="small" :type="proxy.enabled ? 'success' : 'info'">
-                {{ proxy.enabled ? '已启用' : '已禁用' }}
-              </el-tag>
-              
               <div class="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[11px] font-medium bg-blue-50 text-blue-600 border border-blue-200/60 dark:bg-blue-900/20 dark:text-blue-400 dark:border-blue-800/40">
                 <el-icon size="14"><Link24Regular /></el-icon>
                 <span>{{ proxy.ruleCount }} 个国家规则</span>
@@ -598,15 +653,24 @@ usePollingScheduler(() => fetchUpstream({ silent: true }), 10000, {
                   <span>国家规则</span>
                 </div>
               </el-button>
-              
-              <el-button-group>
-                <el-button size="small" @click="openUpstreamDrawer(proxy)">
-                  <el-icon><Edit24Regular /></el-icon>
+
+              <el-button size="small" @click="openUpstreamDrawer(proxy)">
+                <el-icon><Edit24Regular /></el-icon>
+              </el-button>
+
+              <el-dropdown trigger="click" @command="handleUpstreamMore">
+                <el-button size="small" text>
+                  <el-icon><MoreHorizontal24Regular /></el-icon>
                 </el-button>
-                <el-button size="small" type="danger" @click="deleteUpstream(proxy)">
-                  <el-icon><Delete24Regular /></el-icon>
-                </el-button>
-              </el-button-group>
+                <template #dropdown>
+                  <el-dropdown-menu>
+                    <el-dropdown-item :command="`delete:${proxy.id}`">
+                      <el-icon><Delete24Regular /></el-icon>
+                      删除
+                    </el-dropdown-item>
+                  </el-dropdown-menu>
+                </template>
+              </el-dropdown>
             </div>
           </div>
         </div>
@@ -632,7 +696,7 @@ usePollingScheduler(() => fetchUpstream({ silent: true }), 10000, {
               <el-icon size="20"><Router24Regular /></el-icon>
             </div>
             <div>
-              <div class="text-lg font-bold text-gray-900 dark:text-white">本地出站实例</div>
+              <div class="text-lg font-bold text-gray-900 dark:text-white">本地代理实例</div>
               <div class="text-xs text-gray-500">每个实例必须绑定一个物理网络接口提供出口通道，通常用于特定分流和IP池场景</div>
             </div>
           </div>
@@ -653,9 +717,12 @@ usePollingScheduler(() => fetchUpstream({ silent: true }), 10000, {
             class="ui-panel-muted p-4 flex flex-col lg:flex-row lg:items-center lg:justify-between gap-3"
           >
             <div class="flex items-center gap-3 min-w-0">
-              <span class="w-2.5 h-2.5 rounded-full shrink-0" :class="inst.status.running ? 'bg-green-500' : 'bg-gray-300'" />
+              <StatusLight :tone="outboundStatusTone(inst)" />
               <div class="min-w-0">
-                <div class="font-bold text-gray-900 dark:text-white truncate">{{ inst.name || inst.id }}</div>
+                <div class="flex items-center gap-2 min-w-0">
+                  <div class="font-bold text-gray-900 dark:text-white truncate">{{ inst.name || inst.id }}</div>
+                  <span class="text-[11px] text-gray-400 shrink-0">{{ outboundStatusLabel(inst) }}</span>
+                </div>
                 <div class="text-xs text-gray-500 mt-0.5 truncate">
                   {{ formatModeLabel(inst.mode) }} · {{ inst.listen_addr }}:{{ inst.listen_port }} · 绑定: {{ devices.find(d => d.id === inst.device_id)?.name || inst.device_id }}
                 </div>
@@ -665,13 +732,7 @@ usePollingScheduler(() => fetchUpstream({ silent: true }), 10000, {
               </div>
             </div>
 
-            <div class="flex items-center gap-2 shrink-0">
-              <el-tag size="small" :type="inst.enabled ? 'success' : 'info'">
-                {{ inst.enabled ? '启用' : '禁用' }}
-              </el-tag>
-              <el-tag size="small" :type="inst.status.running ? 'success' : 'danger'">
-                {{ inst.status.running ? '运行中' : '已停止' }}
-              </el-tag>
+            <div class="flex items-center gap-2 shrink-0 flex-wrap">
               <el-tag size="small" type="info">
                 {{ formatModeLabel(inst.mode) }}
               </el-tag>
@@ -679,24 +740,34 @@ usePollingScheduler(() => fetchUpstream({ silent: true }), 10000, {
                 {{ inst.auth_enabled ? '账号认证' : '免认证' }}
               </el-tag>
 
-              <el-button-group class="ml-2">
-                <el-button v-if="!inst.status.running" size="small" :disabled="!inst.enabled" @click="startInstance(inst.id)">
-                  <el-icon><Play24Regular /></el-icon>
-                </el-button>
-                <el-button v-if="inst.status.running" size="small" @click="stopInstance(inst.id)">
-                  <el-icon><Stop24Regular /></el-icon>
-                </el-button>
-                <el-button size="small" @click="restartInstance(inst.id)" :disabled="!inst.enabled">
-                  <el-icon><ArrowSync24Regular /></el-icon>
-                </el-button>
-              </el-button-group>
+              <el-button v-if="!inst.status.running" size="small" :disabled="!inst.enabled" @click="startInstance(inst.id)">
+                <el-icon><Play24Regular /></el-icon>
+              </el-button>
+              <el-button v-if="inst.status.running" size="small" @click="stopInstance(inst.id)">
+                <el-icon><Stop24Regular /></el-icon>
+              </el-button>
 
               <el-button size="small" @click="openDrawer(inst)">
                 <el-icon><Edit24Regular /></el-icon>
               </el-button>
-              <el-button size="small" type="danger" @click="deleteInstance(inst.id)">
-                <el-icon><Delete24Regular /></el-icon>
-              </el-button>
+
+              <el-dropdown trigger="click" @command="handleInstanceMore">
+                <el-button size="small" text>
+                  <el-icon><MoreHorizontal24Regular /></el-icon>
+                </el-button>
+                <template #dropdown>
+                  <el-dropdown-menu>
+                    <el-dropdown-item :command="`restart:${inst.id}`" :disabled="!inst.enabled">
+                      <el-icon><ArrowSync24Regular /></el-icon>
+                      重启
+                    </el-dropdown-item>
+                    <el-dropdown-item :command="`delete:${inst.id}`">
+                      <el-icon><Delete24Regular /></el-icon>
+                      删除
+                    </el-dropdown-item>
+                  </el-dropdown-menu>
+                </template>
+              </el-dropdown>
             </div>
           </div>
         </div>
@@ -704,7 +775,7 @@ usePollingScheduler(() => fetchUpstream({ silent: true }), 10000, {
     </div>
 
     <!-- ═══════════ 出站代理编辑 Drawer ═══════════ -->
-    <el-drawer v-model="drawerOpen" :title="editingInstance ? '编辑代理实例' : '新增代理实例'" size="560px">
+    <el-drawer v-model="drawerOpen" :title="editingInstance ? '编辑代理实例' : '新增实例'" size="560px">
       <div class="space-y-6 pb-6">
         <div class="space-y-4">
           <div class="flex items-center gap-2 pb-2 border-b border-gray-100 dark:border-gray-800">
@@ -845,7 +916,12 @@ usePollingScheduler(() => fetchUpstream({ silent: true }), 10000, {
             </div>
             <div class="space-y-1">
               <label class="text-xs font-bold text-gray-500 uppercase tracking-wider">密码</label>
-              <el-input v-model="upstreamForm.password" type="password" show-password placeholder="留空则免鉴权" />
+              <el-input
+                v-model="upstreamForm.password"
+                type="password"
+                show-password
+                :placeholder="editingUpstream ? '留空保持原密码' : '留空则免鉴权'"
+              />
               <div class="text-xs text-gray-400 mt-1">编辑已有代理时留空会保持原密码不变。</div>
             </div>
           </div>
@@ -893,7 +969,7 @@ usePollingScheduler(() => fetchUpstream({ silent: true }), 10000, {
                   <div class="text-xs text-gray-400 font-mono truncate">MCC {{ rule.mccs.join('/') || '-' }}</div>
                 </div>
               </div>
-              <el-button size="small" type="danger" text @click="doDeleteCountryRule(rule.country_code)">
+              <el-button size="small" type="danger" text @click="doDeleteCountryRule(rule)">
                 删除规则
               </el-button>
             </div>

@@ -199,6 +199,11 @@ export type TestEmailResponse = {
   message: string
 }
 
+export type TestSimpleNotificationResponse = {
+  ok: boolean
+  message: string
+}
+
 export const systemService = {
   getInfo() {
     return callService(async () => {
@@ -225,6 +230,30 @@ export const systemService = {
         applied: res.data?.applied,
         warning: res.data?.warning
       }
+    })
+  },
+  testTelegram(payload: TelegramSettings) {
+    return callService(async () => {
+      const res = await api.post<TestSimpleNotificationResponse>('/settings/notifications/telegram/test', payload)
+      return res.data
+    })
+  },
+  testFeishu(payload: FeishuSettings) {
+    return callService(async () => {
+      const res = await api.post<TestSimpleNotificationResponse>('/settings/notifications/feishu/test', payload)
+      return res.data
+    })
+  },
+  testQQ(payload: QQSettings) {
+    return callService(async () => {
+      const res = await api.post<TestSimpleNotificationResponse>('/settings/notifications/qq/test', payload)
+      return res.data
+    })
+  },
+  testPushplus(payload: PushplusSettings) {
+    return callService(async () => {
+      const res = await api.post<TestSimpleNotificationResponse>('/settings/notifications/pushplus/test', payload)
+      return res.data
     })
   },
   testWebhook(payload: TestWebhookPayload) {

@@ -36,6 +36,10 @@ const props = defineProps<{
   deviceOnline?: boolean
 }>()
 
+const emit = defineEmits<{
+  editPolicy: []
+}>()
+
 // 数据状态
 const loading = ref(false)
 const profilesRefreshing = ref(false)
@@ -57,6 +61,7 @@ const notifications = ref<EsimNotificationItem[]>([])
 const notificationsLoading = ref(false)
 const notificationsDialogOpen = ref(false)
 const retryingNotificationSequence = ref<number | null>(null)
+const downloadDialogOpen = ref(false)
 
 // 下载表单
 const downloadForm = ref({
@@ -470,7 +475,7 @@ onBeforeUnmount(() => {
       <div class="ui-panel-muted p-4 relative overflow-hidden esim-loading-hero">
         <div class="flex items-center gap-3">
           <div class="w-10 h-10 rounded-xl esim-orbit flex items-center justify-center text-white text-xs font-bold">
-            ESIM
+            eSIM
           </div>
           <div class="space-y-2 flex-1">
             <div class="h-4 w-44 rounded-md esim-skeleton-line" />
@@ -501,7 +506,7 @@ onBeforeUnmount(() => {
       <div class="flex items-center justify-between gap-3 mb-3">
         <div class="flex items-center gap-3 min-w-0">
           <div class="w-9 h-9 rounded-xl bg-gradient-to-br from-emerald-500 to-teal-600 text-white text-xs font-bold flex items-center justify-center shadow-lg shadow-emerald-500/25">
-            ESIM
+            eSIM
           </div>
           <div>
             <div class="text-base font-bold text-gray-900 dark:text-white">
@@ -516,6 +521,10 @@ onBeforeUnmount(() => {
           </div>
         </div>
         <div class="flex items-center gap-2">
+          <el-button type="primary" plain @click="downloadDialogOpen = true">
+            <el-icon><ArrowDownload24Regular /></el-icon>
+            下载新 Profile
+          </el-button>
           <el-tooltip content="手动刷新" placement="top">
             <el-button circle text :loading="profilesRefreshing" @click="fetchOverview(true)">
               <el-icon v-if="shouldShowEsimRefreshIcon(profilesRefreshing)" size="18"><ArrowSync24Regular /></el-icon>
@@ -526,7 +535,7 @@ onBeforeUnmount(() => {
               <el-icon v-if="shouldShowEsimNotificationIcon(notificationsLoading)" size="18"><Alert24Regular /></el-icon>
             </el-button>
           </el-tooltip>
-          <el-tooltip :content="showSensitive ? '隐藏敏感信息' : '显示敏感信息'" placement="top">
+          <el-tooltip :content="showSensitive ? '全局隐藏敏感信息' : '全局显示敏感信息'" placement="top">
             <el-button circle text @click="showSensitive = !showSensitive">
               <el-icon size="18">
                 <Eye24Regular v-if="showSensitive" />
@@ -537,6 +546,29 @@ onBeforeUnmount(() => {
         </div>
       </div>
     </div>
+
+      <div v-if="downloading || downloadError" class="ui-panel-muted p-4 space-y-2 border border-indigo-100/70 dark:border-indigo-500/20">
+        <div class="flex items-center justify-between gap-3">
+          <div class="text-sm font-bold text-gray-900 dark:text-white">
+            {{ downloading ? '正在下载 Profile' : 'Profile 下载未完成' }}
+          </div>
+          <el-button size="small" type="primary" plain @click="downloadDialogOpen = true">
+            查看详情
+          </el-button>
+        </div>
+        <el-progress
+          :key="downloadSessionId"
+          :percentage="downloadProgress"
+          :status="downloadError ? 'exception' : downloadProgress >= 100 ? 'success' : undefined"
+          :striped="downloading && downloadProgress < 100"
+          :striped-flow="downloading && downloadProgress < 100"
+          :duration="8"
+          :stroke-width="10"
+        />
+        <div class="text-xs" :class="downloadError ? 'text-red-500' : 'text-gray-500 dark:text-gray-400'">
+          {{ downloadError || downloadMsg }}
+        </div>
+      </div>
 
       <!-- 按 eUICC 分组的 Profiles -->
       <div v-for="(group, gi) in profiles" :key="group.aid_hex || group.eid || ('group-' + gi)" class="ui-panel-muted overflow-hidden">
@@ -677,7 +709,7 @@ onBeforeUnmount(() => {
               :iccid="p.iccid"
               :is-active-card="p.state === 1"
               :device-online="props.deviceOnline === true"
-              @policy-changed="fetchOverview(true)"
+              @edit-policy="emit('editPolicy')"
             />
           </div>
         </template>
@@ -732,66 +764,70 @@ onBeforeUnmount(() => {
         </div>
       </el-dialog>
 
-      <!-- 下载新 Profile -->
-      <div v-if="chipInfo" class="ui-panel-muted p-4">
-      <div class="flex items-center gap-2 mb-3">
-        <div class="w-7 h-7 rounded-lg bg-indigo-50 dark:bg-indigo-500/10 flex items-center justify-center text-indigo-600 dark:text-indigo-400">
-          <el-icon size="16"><Add24Regular /></el-icon>
-        </div>
-        <div class="text-sm font-bold text-gray-900 dark:text-white">下载新 Profile</div>
-      </div>
-      <div class="grid grid-cols-1 lg:grid-cols-2 gap-3">
-        <div class="space-y-1">
-          <div class="text-[11px] font-bold text-gray-500 uppercase tracking-wider">SM-DP+ 地址 *</div>
-          <el-input v-model="downloadForm.smdp" placeholder="例如 rsp.truphone.com" />
-        </div>
-        <div class="space-y-1">
-          <div class="text-[11px] font-bold text-gray-500 uppercase tracking-wider">Matching ID</div>
-          <el-input v-model="downloadForm.matchingId" placeholder="可选" />
-        </div>
-        <div class="space-y-1">
-          <div class="text-[11px] font-bold text-gray-500 uppercase tracking-wider">确认码</div>
-          <el-input v-model="downloadForm.confirmationCode" placeholder="可选" />
-        </div>
-        <div class="space-y-1">
-          <div class="text-[11px] font-bold text-gray-500 uppercase tracking-wider">IMEI</div>
-          <el-input v-model="downloadForm.imei" maxlength="15" placeholder="默认使用设备 IMEI，可修改" />
-        </div>
-        <div class="space-y-1">
-          <div class="text-[11px] font-bold text-gray-500 uppercase tracking-wider">目标 eUICC</div>
-          <el-select v-model="downloadForm.aidHex" placeholder="选择目标 eUICC">
-            <el-option
-              v-for="(eid, ei) in (chipInfo?.eids || [])"
-              :key="eid.aid"
-              :label="`eUICC #${Number(ei) + 1} (...${eid.eid.slice(-4)}) — ${eid.free_nvram} 可用`"
-              :value="eid.aid"
-            />
-          </el-select>
-        </div>
-      </div>
-      <!-- 下载进度条 -->
-      <div v-if="downloading || downloadError" class="mt-4 space-y-1.5">
-        <el-progress
-          :key="downloadSessionId"
-          :percentage="downloadProgress"
-          :status="downloadError ? 'exception' : downloadProgress >= 100 ? 'success' : undefined"
-          :striped="downloading && downloadProgress < 100"
-          :striped-flow="downloading && downloadProgress < 100"
-          :duration="8"
-          :stroke-width="10"
-        />
-        <div class="text-xs" :class="downloadError ? 'text-red-500' : 'text-gray-500 dark:text-gray-400'">
-          {{ downloadError || downloadMsg }}
-        </div>
-      </div>
+      <el-dialog
+        v-model="downloadDialogOpen"
+        title="下载新 Profile"
+        width="min(560px, 92vw)"
+        class="glass-modal"
+        :close-on-click-modal="!downloading"
+      >
+        <div class="space-y-4">
+          <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <div class="space-y-1 sm:col-span-2">
+              <div class="text-[11px] font-bold text-gray-500 uppercase tracking-wider">SM-DP+ 地址 *</div>
+              <el-input v-model="downloadForm.smdp" :disabled="downloading" placeholder="例如 rsp.truphone.com" />
+            </div>
+            <div class="space-y-1">
+              <div class="text-[11px] font-bold text-gray-500 uppercase tracking-wider">Matching ID</div>
+              <el-input v-model="downloadForm.matchingId" :disabled="downloading" placeholder="可选" />
+            </div>
+            <div class="space-y-1">
+              <div class="text-[11px] font-bold text-gray-500 uppercase tracking-wider">确认码</div>
+              <el-input v-model="downloadForm.confirmationCode" :disabled="downloading" placeholder="可选" />
+            </div>
+            <div class="space-y-1">
+              <div class="text-[11px] font-bold text-gray-500 uppercase tracking-wider">IMEI</div>
+              <el-input v-model="downloadForm.imei" :disabled="downloading" maxlength="15" placeholder="默认使用设备 IMEI，可修改" />
+            </div>
+            <div class="space-y-1">
+              <div class="text-[11px] font-bold text-gray-500 uppercase tracking-wider">目标 eUICC</div>
+              <el-select v-model="downloadForm.aidHex" :disabled="downloading" placeholder="选择目标 eUICC" class="w-full">
+                <el-option
+                  v-for="(eid, ei) in (chipInfo?.eids || [])"
+                  :key="eid.aid"
+                  :label="`eUICC #${Number(ei) + 1} (...${eid.eid.slice(-4)}) — ${eid.free_nvram} 可用`"
+                  :value="eid.aid"
+                />
+              </el-select>
+            </div>
+          </div>
 
-      <div class="flex justify-end mt-4">
-        <el-button type="primary" :loading="downloading" :disabled="downloading" @click="downloadProfile" class="!border-0">
-          <el-icon><ArrowDownload24Regular /></el-icon>
-          开始下载
-        </el-button>
-      </div>
-    </div>
+          <div v-if="downloading || downloadError" class="space-y-1.5">
+            <el-progress
+              :key="downloadSessionId"
+              :percentage="downloadProgress"
+              :status="downloadError ? 'exception' : downloadProgress >= 100 ? 'success' : undefined"
+              :striped="downloading && downloadProgress < 100"
+              :striped-flow="downloading && downloadProgress < 100"
+              :duration="8"
+              :stroke-width="10"
+            />
+            <div class="text-xs" :class="downloadError ? 'text-red-500' : 'text-gray-500 dark:text-gray-400'">
+              {{ downloadError || downloadMsg }}
+            </div>
+          </div>
+        </div>
+
+        <template #footer>
+          <div class="flex justify-end gap-2">
+            <el-button :disabled="downloading" @click="downloadDialogOpen = false">关闭</el-button>
+            <el-button type="primary" :loading="downloading" :disabled="downloading" @click="downloadProfile" class="!border-0">
+              <el-icon><ArrowDownload24Regular /></el-icon>
+              开始下载
+            </el-button>
+          </div>
+        </template>
+      </el-dialog>
 
       <!-- 空状态 -->
       <EmptyState v-if="profiles.length === 0 && !chipInfo" title="未检测到 eUICC" subtitle="此SIM卡可能不支持 eUICC 功能" />
