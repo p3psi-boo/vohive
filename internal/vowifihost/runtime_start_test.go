@@ -19,6 +19,12 @@ func (runtimeStartTestModem) IsSimInserted() bool {
 func (runtimeStartTestModem) QuerySIMInserted() (bool, error) { return true, nil }
 func (runtimeStartTestModem) GetRegStatus() (int, string)     { return 1, "registered" }
 func (runtimeStartTestModem) GetNetworkMode() string          { return "LTE" }
+func (runtimeStartTestModem) GetISIMIdentity() (identity.Identity, error) {
+	return identity.Identity{}, nil
+}
+func (runtimeStartTestModem) ResolveLogicalChannelAID(app string, fallbackAID string) (string, string, error) {
+	return fallbackAID, "test", nil
+}
 func (runtimeStartTestModem) ExecuteATSilent(string, time.Duration) (string, error) {
 	return "", nil
 }
@@ -70,7 +76,7 @@ func TestManagerStartRuntimeBuildsRequestAndClaimsInstance(t *testing.T) {
 		t.Fatal("StartRuntime() should claim instance in runtime store")
 	}
 	if captured.Mode != runtimehost.StartModeMain || captured.DeviceID != deviceID || captured.TraceID != "trace-1" {
-		t.Fatalf("captured request identity = mode %q device %q trace %q", captured.Mode, captured.DeviceID, captured.TraceID)
+		t.Fatalf("captured request identity = mode %v device %q trace %q", captured.Mode, captured.DeviceID, captured.TraceID)
 	}
 	if captured.SIM == nil || captured.Access == nil {
 		t.Fatal("captured request should include SIM and Access adapters")

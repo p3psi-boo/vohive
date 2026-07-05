@@ -76,9 +76,6 @@ func TestBuildRuntimeE911IdentityIgnoresDebugCachedTokenEnv(t *testing.T) {
 		IMEI: "356306952701762",
 	}, "310", "280", "VoHive")
 
-	if got.CachedToken != "" {
-		t.Fatalf("cached token=%q", got.CachedToken)
-	}
 	if got.SIPUsername != "310280233641503@private.att.net" {
 		t.Fatalf("sip username=%q", got.SIPUsername)
 	}

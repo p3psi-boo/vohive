@@ -135,4 +135,4 @@ environment:
 
 ## 📝 License
 
-MIT License
+PolyForm Noncommercial License 1.0.0. See the repository `LICENSE` file for details.

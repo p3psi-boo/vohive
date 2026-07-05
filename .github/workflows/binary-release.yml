@@ -79,15 +79,6 @@ jobs:
           go-version-file: go.mod
           cache: true
 
-      - name: Configure Git for private modules
-        env:
-          GH_PAT: ${{ secrets.GH_PAT }}
-        run: |
-          if [ -n "${GH_PAT}" ]; then
-            git config --global url."https://x-access-token:${GH_PAT}@github.com/iniwex5/".insteadOf "https://github.com/iniwex5/"
-            go env -w GOPRIVATE=github.com/iniwex5/*
-          fi
-
       - name: Prepare build vars
         id: vars
         shell: bash

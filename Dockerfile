@@ -8,22 +8,17 @@ RUN npm run build
 
 # 构建阶段 2: 后端构建 (Backend)
 FROM golang:1.24-alpine AS backend-builder
-ARG GH_PAT=""
 WORKDIR /app
 
 # 启用 Go 工具链自动下载
 ENV GOTOOLCHAIN=auto
-ENV GOPRIVATE=github.com/iniwex5/*
-ENV GONOSUMDB=github.com/iniwex5/*
 
 # 安装构建依赖
 RUN apk add --no-cache git
 
-# 配置 Git 以支持拉取私有库
-RUN if [ -n "${GH_PAT}" ]; then git config --global url."https://x-access-token:${GH_PAT}@github.com/iniwex5/".insteadOf "https://github.com/iniwex5/"; fi
-
 # 复制 go mod 文件
 COPY go-4gproxy/go.mod go-4gproxy/go.sum ./
+COPY go-4gproxy/third_party ./third_party
 
 RUN go mod download
 

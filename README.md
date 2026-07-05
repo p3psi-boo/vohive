@@ -32,6 +32,24 @@ VoHive 把模组热插拔管理、SOCKS5/HTTP 代理编排、短信收发、VoWi
 - **Database**:SQLite(`vohive.db`)
 - **CI/CD**:GitHub Actions 自动化多架构 Docker 镜像构建与发布
 
+## Development
+
+本仓库使用 Nix flake 声明开发环境。推荐入口:
+
+```bash
+nix develop
+make verify
+make build-local
+```
+
+`make build-local` 会构建前端资源并生成本机后端二进制到 `dist/vohive`。发布或交叉编译可使用:
+
+```bash
+make build-all ENABLE_UPX=0
+```
+
+VoWiFi 运行时源码以本地模块形式保存在 `third_party/vowifi-go`,并通过 `go.mod` 的 `replace` 指向本地目录。普通构建不需要访问私有 Go module 或配置 `GOPRIVATE`。
+
 
 ## 免责声明
 

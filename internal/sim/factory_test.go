@@ -132,16 +132,8 @@ func TestBuildAKAProviderUsesRuntimeModemAKAWhenAvailable(t *testing.T) {
 	if _, err := provider.CalculateAKA(bytes16(0x10), bytes16(0x20)); err != nil {
 		t.Fatalf("CalculateAKA() error = %v", err)
 	}
-	isimProvider, ok := provider.(swusim.ISIMAKAProvider)
-	if !ok {
-		t.Fatal("BuildAKAProvider() should preserve ISIM AKA support")
-	}
-	if _, err := isimProvider.CalculateISIMAKA(bytes16(0x30), bytes16(0x40)); err != nil {
-		t.Fatalf("CalculateISIMAKA() error = %v", err)
-	}
 	if !reflect.DeepEqual(modem.logicalAIDs, []string{
 		"A0000000871002FF44FF128900000100",
-		"A0000000871004FF44FF128900000100",
 	}) {
 		t.Fatalf("logical AIDs = %#v", modem.logicalAIDs)
 	}

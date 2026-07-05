@@ -267,7 +267,7 @@ func (p *Pool) prepareVoWiFiStartContext(deviceID, traceID, runtimeEPDGOverride 
 	startCtx.Proxy = resolveVoWiFiCountryProxy(startProfile.MCC, traceID, deviceID)
 
 	startCtx.NetworkMode = modemIface.GetNetworkMode()
-	startCtx.StartupState = newVoWiFiSIMReadyStartupState(deviceID, swu.DataplaneModeUserspace, startCtx.NetworkMode, time.Now())
+	startCtx.StartupState = newVoWiFiSIMReadyStartupState(deviceID, string(swu.DataplaneModeUserspace), startCtx.NetworkMode, time.Now())
 	p.recordVoWiFiStartupState(deviceID, startCtx.StartupState)
 	return startCtx, nil
 }
