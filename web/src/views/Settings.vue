@@ -4,6 +4,7 @@ import { onBeforeRouteLeave } from 'vue-router'
 import { storeToRefs } from 'pinia'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { useSettingsStore } from '../stores/settings'
+import { copyToClipboard } from '../utils/clipboard'
 import PageHeader from '../components/PageHeader.vue'
 import FieldRow from '../components/FieldRow.vue'
 import { 
@@ -18,6 +19,11 @@ import {
 const settingsStore = useSettingsStore()
 const {
   systemInfo,
+  mcpKey,
+  generatedMCPKey,
+  loadingMCPKey,
+  generatingMCPKey,
+  revokingMCPKey,
   loadingNotifications,
   savingNotifications,
   testingTelegram,
@@ -39,6 +45,22 @@ const {
 } = storeToRefs(settingsStore)
 const activeNotifyTab = ref('telegram')
 const notificationBaseline = ref('')
+const mcpEndpoint = computed(() => {
+  if (typeof window === 'undefined') return '/mcp'
+  return `${window.location.origin}/mcp`
+})
+const mcpCurlTemplate = computed(() => `curl -X POST '${mcpEndpoint.value}' \\
+  -H 'Authorization: Bearer <MCP Key>' \\
+  -H 'Content-Type: application/json' \\
+  -H 'Accept: application/json, text/event-stream' \\
+  -d '{"jsonrpc":"2.0","id":1,"method":"tools/list"}'`)
+const mcpCreatedAtText = computed(() => {
+  const raw = String(mcpKey.value.created_at || '').trim()
+  if (!raw) return '--'
+  const d = new Date(raw)
+  if (Number.isNaN(d.getTime())) return raw
+  return d.toLocaleString()
+})
 
 function sortedRecord(input: Record<string, string> | undefined) {
   const out: Record<string, string> = {}
@@ -145,6 +167,12 @@ async function loadSystemInfo() {
   }
 }
 
+async function loadMCPKey() {
+  const result = await settingsStore.fetchMCPKey()
+  if (!result.ok) {
+    ElMessage.error(result.error.message || 'MCP Key 状态读取失败')
+  }
+}
 
 async function loadNotifications() {
   try {
@@ -164,6 +192,61 @@ function openAPIDocs() {
     return
   }
   window.open(docsURL, '_blank', 'noopener,noreferrer')
+}
+
+async function copyMcpEndpoint() {
+  await copyToClipboard(mcpEndpoint.value, 'MCP 地址已复制')
+}
+
+async function copyMcpCurlTemplate() {
+  await copyToClipboard(mcpCurlTemplate.value, 'MCP 调用模板已复制')
+}
+
+async function copyGeneratedMCPKey() {
+  if (!generatedMCPKey.value) return
+  await copyToClipboard(generatedMCPKey.value, 'MCP Key 已复制')
+}
+
+async function generateMCPKey() {
+  const confirmed = await ElMessageBox.confirm(
+    mcpKey.value.enabled
+      ? '生成新的 MCP Key 会立即替换旧 Key，旧客户端会失去访问权限。确定继续？'
+      : '生成后只会显示一次明文，请及时复制并保存到可信客户端。确定生成？',
+    mcpKey.value.enabled ? '轮换 MCP Key' : '生成 MCP Key',
+    {
+      confirmButtonText: mcpKey.value.enabled ? '生成新 Key' : '生成',
+      cancelButtonText: '取消',
+      type: 'warning'
+    }
+  ).then(() => true).catch(() => false)
+  if (!confirmed) return
+
+  const result = await settingsStore.generateMCPKey()
+  if (!result.ok) {
+    ElMessage.error(result.error.message || 'MCP Key 生成失败')
+    return
+  }
+  ElMessage.success('MCP Key 已生成，请复制保存')
+}
+
+async function revokeMCPKey() {
+  const confirmed = await ElMessageBox.confirm(
+    '撤销后所有使用当前 MCP Key 的客户端会立即失去访问权限。确定撤销？',
+    '撤销 MCP Key',
+    {
+      confirmButtonText: '撤销',
+      cancelButtonText: '取消',
+      type: 'warning'
+    }
+  ).then(() => true).catch(() => false)
+  if (!confirmed) return
+
+  const result = await settingsStore.revokeMCPKey()
+  if (!result.ok) {
+    ElMessage.error(result.error.message || 'MCP Key 撤销失败')
+    return
+  }
+  ElMessage.success('MCP Key 已撤销')
 }
 
 async function saveNotifications() {
@@ -382,6 +465,7 @@ watch(() => emailForm.value.smtp_port, (newPort) => {
 onMounted(() => {
   loadNotifications()
   loadSystemInfo()
+  loadMCPKey()
 })
 
 onBeforeUnmount(() => {
@@ -495,6 +579,93 @@ onBeforeRouteLeave(async () => {
                   <el-icon><DocumentText24Regular /></el-icon>
                   打开 API 文档
                 </el-button>
+              </div>
+            </div>
+            <div class="ui-panel-muted px-4 py-4">
+              <div class="flex flex-col gap-4">
+                <div class="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-4">
+                  <div class="min-w-0">
+                    <div class="flex items-center gap-3">
+                      <div class="w-9 h-9 rounded-xl bg-cyan-50 dark:bg-cyan-500/10 flex items-center justify-center text-cyan-600 dark:text-cyan-400">
+                        <el-icon size="18"><Server24Regular /></el-icon>
+                      </div>
+                      <div>
+                        <div class="text-sm font-bold text-gray-800 dark:text-gray-100">MCP 服务</div>
+                        <div class="text-xs text-gray-500">Streamable HTTP，用于 Agent 调用短信和 eSIM 操作</div>
+                      </div>
+                    </div>
+                  </div>
+                  <div class="flex items-center gap-2 shrink-0">
+                    <el-tag :type="mcpKey.enabled ? 'success' : 'info'" effect="light">
+                      {{ mcpKey.enabled ? 'Key 已启用' : '未生成 Key' }}
+                    </el-tag>
+                    <el-tag type="warning" effect="light">高风险工具</el-tag>
+                  </div>
+                </div>
+
+                <div class="space-y-2">
+                  <div class="p-3 bg-gray-50 dark:bg-white/5 rounded-lg">
+                    <FieldRow label="地址" :value="mcpEndpoint" monospace>
+                      <div class="flex items-center justify-end gap-3 min-w-0">
+                        <span class="font-mono text-xs truncate">{{ mcpEndpoint }}</span>
+                        <el-button text type="primary" class="!px-1 shrink-0" @click="copyMcpEndpoint">复制</el-button>
+                      </div>
+                    </FieldRow>
+                  </div>
+                  <div v-if="generatedMCPKey" class="p-3 border border-amber-200 dark:border-amber-500/30 bg-amber-50/80 dark:bg-amber-500/10 rounded-lg">
+                    <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+                      <div class="min-w-0">
+                        <div class="text-xs font-bold text-amber-700 dark:text-amber-300 mb-1">新 MCP Key 只显示一次</div>
+                        <div class="font-mono text-xs text-amber-900 dark:text-amber-100 break-all">{{ generatedMCPKey }}</div>
+                      </div>
+                      <div class="flex items-center gap-2 shrink-0">
+                        <el-button type="primary" class="!border-0" @click="copyGeneratedMCPKey">复制 Key</el-button>
+                        <el-button text @click="settingsStore.clearGeneratedMCPKey()">隐藏</el-button>
+                      </div>
+                    </div>
+                  </div>
+                  <div class="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs text-gray-600 dark:text-gray-300">
+                    <div class="p-3 bg-gray-50 dark:bg-white/5 rounded-lg">
+                      <div class="font-bold text-gray-700 dark:text-gray-100 mb-1">鉴权</div>
+                      <div>使用独立 MCP Key，放在 <span class="font-mono">Authorization: Bearer</span> 请求头。</div>
+                    </div>
+                    <div class="p-3 bg-gray-50 dark:bg-white/5 rounded-lg">
+                      <div class="font-bold text-gray-700 dark:text-gray-100 mb-1">当前 Key</div>
+                      <div v-if="loadingMCPKey">正在读取...</div>
+                      <div v-else-if="mcpKey.enabled">尾号 {{ mcpKey.key_suffix || '----' }}，创建于 {{ mcpCreatedAtText }}</div>
+                      <div v-else>尚未生成，MCP 仅接受 Web 登录 token。</div>
+                    </div>
+                    <div class="p-3 bg-gray-50 dark:bg-white/5 rounded-lg">
+                      <div class="font-bold text-gray-700 dark:text-gray-100 mb-1">工具</div>
+                      <div><span class="font-mono">send_sms</span>、<span class="font-mono">switch_esim_profile</span></div>
+                    </div>
+                    <div class="p-3 bg-gray-50 dark:bg-white/5 rounded-lg">
+                      <div class="font-bold text-gray-700 dark:text-gray-100 mb-1">传输</div>
+                      <div>单端点 JSON-RPC；POST 返回 JSON，GET 不开启 SSE。</div>
+                    </div>
+                  </div>
+                </div>
+
+                <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 border-t border-gray-100 dark:border-white/10 pt-4">
+                  <div class="text-xs text-gray-500 dark:text-gray-400">
+                    MCP Key 会真实发送短信或切换 eSIM，建议只保存到可信客户端；轮换会立刻替换旧 Key。
+                  </div>
+                  <div class="flex flex-wrap gap-2">
+                    <el-button class="!border-0" @click="copyMcpCurlTemplate">复制调用模板</el-button>
+                    <el-button type="primary" class="!border-0" :loading="generatingMCPKey" @click="generateMCPKey">
+                      {{ mcpKey.enabled ? '轮换 Key' : '生成 Key' }}
+                    </el-button>
+                    <el-button
+                      v-if="mcpKey.enabled"
+                      type="danger"
+                      class="!border-0"
+                      :loading="revokingMCPKey"
+                      @click="revokeMCPKey"
+                    >
+                      撤销
+                    </el-button>
+                  </div>
+                </div>
               </div>
             </div>
          </div>

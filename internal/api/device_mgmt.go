@@ -1730,6 +1730,49 @@ type esimSwitchResponse struct {
 	SIMReloadWarning   string `json:"sim_reload_warning,omitempty"`
 }
 
+func (s *Server) switchESIMProfile(ctx context.Context, deviceID string, req esimSwitchRequest) (esimSwitchResponse, int, error) {
+	deviceID = strings.TrimSpace(deviceID)
+	req.ICCID = strings.TrimSpace(req.ICCID)
+	req.AIDHex = strings.TrimSpace(req.AIDHex)
+	if deviceID == "" {
+		return esimSwitchResponse{}, http.StatusBadRequest, errors.New("device_id 不能为空")
+	}
+	if req.ICCID == "" {
+		return esimSwitchResponse{}, http.StatusBadRequest, errors.New("iccid 不能为空")
+	}
+
+	worker := s.pool.GetWorker(deviceID)
+	if worker == nil || worker.EsimMgr == nil {
+		return esimSwitchResponse{}, http.StatusNotFound, errors.New("设备或esim管理器未找到")
+	}
+
+	switchCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
+
+	result, err := worker.EsimMgr.SwitchProfileWithResult(switchCtx, req.ICCID, req.AIDHex)
+	if err != nil {
+		if isEsimBusyError(err) {
+			return esimSwitchResponse{}, http.StatusConflict, err
+		}
+		return esimSwitchResponse{}, http.StatusInternalServerError, fmt.Errorf("esim配置切换失败: %w", err)
+	}
+
+	return esimSwitchResponse{
+		Message:            "eSIM Profile 切换指令已提交，设备信息将异步刷新",
+		TargetICCID:        result.TargetICCID,
+		SwitchToken:        result.SwitchToken,
+		SwitchPhase:        string(result.Phase),
+		SwitchAccepted:     result.SwitchAccepted,
+		RecoveryPending:    result.RecoveryPending,
+		DegradedReason:     result.DegradedReason,
+		PostSwitchAsync:    result.PostSwitchAsync,
+		CachePatched:       result.CachePatched,
+		SIMReloadAttempted: result.PowerCycleAttempt,
+		SIMReloadOK:        result.PowerCycleAttempt && result.SIMReloadWarning == "",
+		SIMReloadWarning:   result.SIMReloadWarning,
+	}, http.StatusOK, nil
+}
+
 const esimBusyRetryAfterMs = 1200
 
 func isEsimBusyError(err error) bool {
@@ -1918,40 +1961,18 @@ func (s *Server) handleEsimSwitchProfile(c *gin.Context) {
 		return
 	}
 
-	worker := s.pool.GetWorker(id)
-	if worker == nil || worker.EsimMgr == nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": "设备或esim管理器未找到"})
-		return
-	}
-
 	// Profile 切换：EnableProfile 后等待目标 profile 生效；切卡后按 Ready+Delay 门控执行后处理（不等待搜网）
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-	defer cancel()
-
-	result, err := worker.EsimMgr.SwitchProfileWithResult(ctx, req.ICCID, req.AIDHex)
+	result, status, err := s.switchESIMProfile(c.Request.Context(), id, req)
 	if err != nil {
-		if isEsimBusyError(err) {
+		if status == http.StatusConflict {
 			respondEsimBusy(c, "switch_profile", err)
 			return
 		}
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "esim配置切换失败: " + err.Error()})
+		c.JSON(status, gin.H{"error": err.Error()})
 		return
 	}
 
-	c.JSON(http.StatusOK, esimSwitchResponse{
-		Message:            "eSIM Profile 切换指令已提交，设备信息将异步刷新",
-		TargetICCID:        result.TargetICCID,
-		SwitchToken:        result.SwitchToken,
-		SwitchPhase:        string(result.Phase),
-		SwitchAccepted:     result.SwitchAccepted,
-		RecoveryPending:    result.RecoveryPending,
-		DegradedReason:     result.DegradedReason,
-		PostSwitchAsync:    result.PostSwitchAsync,
-		CachePatched:       result.CachePatched,
-		SIMReloadAttempted: result.PowerCycleAttempt,
-		SIMReloadOK:        result.PowerCycleAttempt && result.SIMReloadWarning == "",
-		SIMReloadWarning:   result.SIMReloadWarning,
-	})
+	c.JSON(http.StatusOK, result)
 
 }
 

@@ -6,6 +6,8 @@ import {
   type NotificationsSettingsResponse,
   type SaveNotificationsPayload,
   type SaveNotificationsResponse,
+  type MCPKeyStatus,
+  type MCPKeyGenerateResponse,
   type SystemInfo,
   type TestWebhookResponse,
   type WebhookSettings,
@@ -24,6 +26,12 @@ const DEFAULT_SYSTEM_INFO: SystemInfo = {
     openapi_yaml: '',
     openapi_json: ''
   }
+}
+
+const DEFAULT_MCP_KEY_STATUS: MCPKeyStatus = {
+  enabled: false,
+  key_suffix: '',
+  created_at: ''
 }
 
 type PasswordForm = {
@@ -157,6 +165,8 @@ const DEFAULT_BARK_SETTINGS: BarkSettings = {
 
 export const useSettingsStore = defineStore('settings', () => {
   const systemInfo = ref<SystemInfo>({ ...DEFAULT_SYSTEM_INFO })
+  const mcpKey = ref<MCPKeyStatus>({ ...DEFAULT_MCP_KEY_STATUS })
+  const generatedMCPKey = ref('')
   const notifications = ref<NotificationsSettingsResponse>({})
   const passwordForm = ref<PasswordForm>({ ...DEFAULT_PASSWORD_FORM })
   const telegramForm = ref<TelegramForm>({ ...DEFAULT_TELEGRAM_FORM })
@@ -168,6 +178,9 @@ export const useSettingsStore = defineStore('settings', () => {
   const pushplusForm = ref<PushplusForm>({ ...DEFAULT_PUSHPLUS_FORM })
 
   const loadingSystemInfo = ref(false)
+  const loadingMCPKey = ref(false)
+  const generatingMCPKey = ref(false)
+  const revokingMCPKey = ref(false)
   const loadingNotifications = ref(false)
   const savingNotifications = ref(false)
   const testingTelegram = ref(false)
@@ -192,6 +205,56 @@ export const useSettingsStore = defineStore('settings', () => {
     }
     loadingSystemInfo.value = false
     return result
+  }
+
+  async function fetchMCPKey() {
+    loadingMCPKey.value = true
+    const result = await systemService.getMCPKey()
+    if (result.ok) {
+      mcpKey.value = result.data || { ...DEFAULT_MCP_KEY_STATUS }
+      error.value = null
+    } else {
+      error.value = result.error
+    }
+    loadingMCPKey.value = false
+    return result
+  }
+
+  async function generateMCPKey() {
+    generatingMCPKey.value = true
+    const result = await systemService.generateMCPKey()
+    if (result.ok) {
+      const data = result.data
+      generatedMCPKey.value = data.key
+      mcpKey.value = {
+        enabled: true,
+        key_suffix: data.key_suffix,
+        created_at: data.created_at
+      }
+      error.value = null
+    } else {
+      error.value = result.error
+    }
+    generatingMCPKey.value = false
+    return result as { ok: true; data: MCPKeyGenerateResponse } | { ok: false; error: AppError }
+  }
+
+  async function revokeMCPKey() {
+    revokingMCPKey.value = true
+    const result = await systemService.revokeMCPKey()
+    if (result.ok) {
+      mcpKey.value = { ...DEFAULT_MCP_KEY_STATUS }
+      generatedMCPKey.value = ''
+      error.value = null
+    } else {
+      error.value = result.error
+    }
+    revokingMCPKey.value = false
+    return result
+  }
+
+  function clearGeneratedMCPKey() {
+    generatedMCPKey.value = ''
   }
 
   async function fetchNotifications() {
@@ -494,6 +557,8 @@ export const useSettingsStore = defineStore('settings', () => {
 
   return {
     systemInfo,
+    mcpKey,
+    generatedMCPKey,
     notifications,
     passwordForm,
     telegramForm,
@@ -504,6 +569,9 @@ export const useSettingsStore = defineStore('settings', () => {
     emailForm,
     pushplusForm,
     loadingSystemInfo,
+    loadingMCPKey,
+    generatingMCPKey,
+    revokingMCPKey,
     loadingNotifications,
     savingNotifications,
     testingTelegram,
@@ -516,6 +584,10 @@ export const useSettingsStore = defineStore('settings', () => {
     changingPassword,
     error,
     fetchSystemInfo,
+    fetchMCPKey,
+    generateMCPKey,
+    revokeMCPKey,
+    clearGeneratedMCPKey,
     fetchNotifications,
     saveNotifications,
     saveNotificationsFromForms,

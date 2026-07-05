@@ -195,3 +195,41 @@ webhook:
 		}
 	}
 }
+
+func TestUpdateMCPKeyInFilePersistsAndRevokes(t *testing.T) {
+	path := writeTempConfig(t, `
+web:
+  username: admin
+  password: secret
+`)
+
+	err := UpdateMCPKeyInFile(path, MCPConfig{
+		KeyHash:   "sha256:abc",
+		KeySuffix: "xyz12345",
+		CreatedAt: "2026-07-05T00:00:00Z",
+	})
+	if err != nil {
+		t.Fatalf("UpdateMCPKeyInFile() error = %v", err)
+	}
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("ReadFile() error = %v", err)
+	}
+	text := string(raw)
+	for _, want := range []string{"mcp:", "key_hash: sha256:abc", "key_suffix: xyz12345", "created_at: \"2026-07-05T00:00:00Z\""} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("expected config to contain %q, got:\n%s", want, text)
+		}
+	}
+
+	if err := UpdateMCPKeyInFile(path, MCPConfig{}); err != nil {
+		t.Fatalf("revoke UpdateMCPKeyInFile() error = %v", err)
+	}
+	raw, err = os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("ReadFile() error = %v", err)
+	}
+	if strings.Contains(string(raw), "mcp:") {
+		t.Fatalf("expected mcp section to be removed, got:\n%s", raw)
+	}
+}

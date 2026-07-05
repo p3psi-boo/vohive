@@ -14,6 +14,19 @@ export type SystemInfo = {
   docs: DocsLinks
 }
 
+export type MCPKeyStatus = {
+  enabled: boolean
+  key_suffix?: string
+  created_at?: string
+}
+
+export type MCPKeyGenerateResponse = {
+  status: string
+  key: string
+  key_suffix: string
+  created_at: string
+}
+
 export type TelegramSettings = {
   enabled: boolean
   bot_token: string
@@ -206,6 +219,24 @@ export const systemService = {
   changePassword(payload: { old_password: string; new_password: string; confirm_password: string }) {
     return callService(async () => {
       await api.post('/settings/password', payload)
+      return true
+    })
+  },
+  getMCPKey() {
+    return callService(async () => {
+      const res = await api.get<MCPKeyStatus>('/settings/mcp-key')
+      return res.data
+    })
+  },
+  generateMCPKey() {
+    return callService(async () => {
+      const res = await api.post<MCPKeyGenerateResponse>('/settings/mcp-key', {})
+      return res.data
+    })
+  },
+  revokeMCPKey() {
+    return callService(async () => {
+      await api.delete('/settings/mcp-key')
       return true
     })
   },

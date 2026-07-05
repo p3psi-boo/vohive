@@ -76,6 +76,7 @@ type Server struct {
 	trafficRT   realtimeTrafficSubscriber
 	proxyRepo   repo.ProxyInstanceRepository
 	proxySyncMu sync.Mutex
+	mcpKeyMu    sync.RWMutex
 	voiceGW     *voicehost.Gateway
 	notifyMgr   *notify.Manager
 	websheets   *vwebsheet.Broker
@@ -189,6 +190,7 @@ func (s *Server) newRouter() *gin.Engine {
 	r.GET("/ping", func(c *gin.Context) {
 		c.JSON(http.StatusOK, gin.H{"message": "pong"})
 	})
+	r.Any("/mcp", s.mcpAuthMiddleware(), s.handleMCP)
 
 	if s.cfg.Debug {
 		r.GET("/debug/embed", s.authMiddleware(), func(c *gin.Context) {
@@ -258,6 +260,9 @@ func (s *Server) newRouter() *gin.Engine {
 		// ===== 系统设置 =====
 		api.GET("/settings/notifications", s.handleGetNotificationSettings)    // 获取通知设置
 		api.PUT("/settings/notifications", s.handleUpdateNotificationSettings) // 更新通知设置
+		api.GET("/settings/mcp-key", s.handleGetMCPKey)
+		api.POST("/settings/mcp-key", s.handleGenerateMCPKey)
+		api.DELETE("/settings/mcp-key", s.handleRevokeMCPKey)
 		api.POST("/settings/notifications/telegram/test", s.handleTestTelegramNotification)
 		api.POST("/settings/notifications/feishu/test", s.handleTestFeishuNotification)
 		api.POST("/settings/notifications/qq/test", s.handleTestQQNotification)
@@ -942,30 +947,43 @@ func (s *Server) handleHealth(c *gin.Context) {
 	}
 }
 
-func (s *Server) handleSendSMS(c *gin.Context) {
-	type SendSMSRequest struct {
-		DeviceID string `json:"device_id"`
-		IMSI     string `json:"imsi"`
-		Phone    string `json:"phone" binding:"required"`
-		Message  string `json:"message" binding:"required"`
-		Encoding string `json:"encoding"`
+type sendSMSRequest struct {
+	DeviceID string `json:"device_id"`
+	IMSI     string `json:"imsi"`
+	Phone    string `json:"phone" binding:"required"`
+	Message  string `json:"message" binding:"required"`
+	Encoding string `json:"encoding"`
+}
+
+type sendSMSResult struct {
+	Status        string `json:"status"`
+	Message       string `json:"message"`
+	Device        string `json:"device"`
+	Phone         string `json:"phone"`
+	MessageID     string `json:"message_id"`
+	PartsTotal    int    `json:"parts_total"`
+	DeliveryState string `json:"delivery_state"`
+}
+
+func (s *Server) sendSMS(ctx context.Context, req sendSMSRequest) (sendSMSResult, int, error) {
+	req.DeviceID = strings.TrimSpace(req.DeviceID)
+	req.IMSI = strings.TrimSpace(req.IMSI)
+	req.Phone = strings.TrimSpace(req.Phone)
+	if req.Phone == "" {
+		return sendSMSResult{}, http.StatusBadRequest, errors.New("phone 不能为空")
+	}
+	if strings.TrimSpace(req.Message) == "" {
+		return sendSMSResult{}, http.StatusBadRequest, errors.New("message 不能为空")
 	}
 
-	var req SendSMSRequest
-	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"status": "error", "message": "参数错误: " + err.Error()})
-		return
-	}
-
-	deviceID := strings.TrimSpace(req.DeviceID)
-	imsi := strings.TrimSpace(req.IMSI)
 	encoding, err := smscodec.NormalizeSMSEncoding(req.Encoding)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"status": "error", "message": "短信编码参数错误: " + err.Error()})
-		return
+		return sendSMSResult{}, http.StatusBadRequest, fmt.Errorf("短信编码参数错误: %w", err)
 	}
 	sendOpts := smscodec.SubmitOptions{Encoding: encoding}
 
+	deviceID := req.DeviceID
+	imsi := req.IMSI
 	var worker *device.Worker
 	if deviceID != "" {
 		worker = s.pool.GetWorker(deviceID)
@@ -994,19 +1012,16 @@ func (s *Server) handleSendSMS(c *gin.Context) {
 		} else if imsi != "" {
 			msg = "未找到匹配 IMSI 的设备: " + imsi
 		}
-		c.JSON(http.StatusNotFound, gin.H{"status": "error", "message": msg})
-		return
+		return sendSMSResult{}, http.StatusNotFound, errors.New(msg)
 	}
 
-	// 获取 IMSI 用于入库
 	imsi = worker.GetIMSI()
 	messageID := ""
 	partsTotal := 1
 	deliveryState := "acked"
 
 	if s.pool.IsVoWiFiActive(deviceID) {
-		// VoWiFi 模式下使用 IMS Core 发送；短信历史由宿主侧 runtime event / failure recorder 入库。
-		outcome, err := s.pool.SendVoWiFiSMSWithOptions(c.Request.Context(), deviceID, req.Phone, req.Message, sendOpts)
+		outcome, err := s.pool.SendVoWiFiSMSWithOptions(ctx, deviceID, req.Phone, req.Message, sendOpts)
 		if outcome.PartsTotal > 0 {
 			partsTotal = outcome.PartsTotal
 		}
@@ -1016,47 +1031,61 @@ func (s *Server) handleSendSMS(c *gin.Context) {
 		messageID = strings.TrimSpace(outcome.MessageID)
 		if err != nil {
 			_ = device.RecordVoWiFiSMSSendFailure(s.pool, deviceID, req.Phone, req.Message, time.Now())
-			c.JSON(http.StatusInternalServerError, gin.H{
-				"status":         "error",
-				"message":        "VoWiFi 短信发送失败: " + err.Error(),
-				"device":         deviceID,
-				"phone":          req.Phone,
-				"message_id":     messageID,
-				"parts_total":    partsTotal,
-				"delivery_state": deliveryState,
-			})
-			return
+			return sendSMSResult{
+				Status:        "error",
+				Message:       "VoWiFi 短信发送失败: " + err.Error(),
+				Device:        deviceID,
+				Phone:         req.Phone,
+				MessageID:     messageID,
+				PartsTotal:    partsTotal,
+				DeliveryState: deliveryState,
+			}, http.StatusInternalServerError, fmt.Errorf("VoWiFi 短信发送失败: %w", err)
 		}
 	} else {
-		// 普通模式使用 AT 发送
 		if err := worker.SendSMSWithOptions(req.Phone, req.Message, sendOpts); err != nil {
-			// 发送失败，入库记录（status=3）
 			if imsi != "" {
 				_ = db.SaveSMS(imsi, worker.ID, req.Phone, req.Message, 2, 3, time.Now())
 			}
-			c.JSON(http.StatusInternalServerError, gin.H{
-				"status":  "error",
-				"message": "发送失败: " + err.Error(),
-				"device":  deviceID,
-				"phone":   req.Phone,
-			})
-			return
+			return sendSMSResult{
+				Status:  "error",
+				Message: "发送失败: " + err.Error(),
+				Device:  deviceID,
+				Phone:   req.Phone,
+			}, http.StatusInternalServerError, fmt.Errorf("发送失败: %w", err)
 		}
-		// 发送成功，入库记录（status=2）
 		if imsi != "" {
 			_ = db.SaveSMS(imsi, worker.ID, req.Phone, req.Message, 2, 2, time.Now())
 		}
 	}
 
-	c.JSON(http.StatusOK, gin.H{
-		"status":         "ok",
-		"message":        "短信发送成功",
-		"device":         deviceID,
-		"phone":          req.Phone,
-		"message_id":     messageID,
-		"parts_total":    partsTotal,
-		"delivery_state": deliveryState,
-	})
+	return sendSMSResult{
+		Status:        "ok",
+		Message:       "短信发送成功",
+		Device:        deviceID,
+		Phone:         req.Phone,
+		MessageID:     messageID,
+		PartsTotal:    partsTotal,
+		DeliveryState: deliveryState,
+	}, http.StatusOK, nil
+}
+
+func (s *Server) handleSendSMS(c *gin.Context) {
+	var req sendSMSRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"status": "error", "message": "参数错误: " + err.Error()})
+		return
+	}
+
+	result, status, err := s.sendSMS(c.Request.Context(), req)
+	if err != nil {
+		if result.Status == "error" && result.Message != "" {
+			c.JSON(status, result)
+			return
+		}
+		c.JSON(status, gin.H{"status": "error", "message": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, result)
 }
 
 func (s *Server) handleSMSDelivery(c *gin.Context) {
