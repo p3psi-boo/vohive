@@ -10,6 +10,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/iniwex5/vohive/internal/androidagent"
 	"github.com/iniwex5/vohive/internal/apduarbiter"
 	"github.com/iniwex5/vohive/internal/backend"
 	"github.com/iniwex5/vohive/internal/cardpolicy"
@@ -201,10 +202,12 @@ type Pool struct {
 	udevWatcher    *UdevWatcher
 	startOnce      sync.Once
 	policyResolver cardpolicy.Resolver
+	androidAgents  *androidagent.Registry
 }
 
 func NewPool(cfg *config.Config) *Pool {
 	ctx, cancel := context.WithCancel(context.Background())
+	androidAgents := androidagent.NewRegistry()
 	p := &Pool{
 		workers:               make(map[string]*Worker),
 		rebuilding:            make(map[string]bool),
@@ -222,12 +225,69 @@ func NewPool(cfg *config.Config) *Pool {
 		switchContexts:        make(map[string]esimSwitchContext),
 		switchTokens:          make(map[string]uint64),
 		lifecycle:             newLifecycleCoordinator(),
+		androidAgents:         androidAgents,
 	}
+	androidAgents.SetSMSHandler(func(deviceID string, event androidagent.SMSReceivedEvent) {
+		if worker := p.GetWorker(deviceID); worker != nil {
+			identity := ""
+			if androidBackend, ok := worker.Backend.(*backend.AndroidBackend); ok {
+				identity = androidBackend.SMSIdentity(event.SubscriptionID)
+			}
+			worker.processSMSWithIdentity(event.Sender, event.Content, event.Timestamp, identity)
+		}
+	})
+	androidAgents.SetSMSStatusHandler(func(deviceID string, event androidagent.SMSStatusEvent) {
+		partState := db.SMSDeliveryPartStatePending
+		errorText := ""
+		switch event.State {
+		case "delivered":
+			partState = db.SMSDeliveryPartStateAcked
+		case "send_failed", "delivery_failed":
+			partState = db.SMSDeliveryPartStateFailed
+			errorText = fmt.Sprintf("%s (result_code=%d)", event.State, event.ResultCode)
+		}
+		if event.Part <= 0 {
+			event.Part = 1
+		}
+		if err := db.UpsertSMSDeliveryPart(event.MessageID, event.Part, "", -1, partState, event.Timestamp); err != nil {
+			logger.Warn("Android 短信回执分片保存失败", "device", deviceID, "message_id", event.MessageID, "err", err)
+			return
+		}
+		if err := db.RecomputeSMSDelivery(event.MessageID, event.Timestamp); err != nil {
+			logger.Warn("Android 短信回执状态聚合失败", "device", deviceID, "message_id", event.MessageID, "err", err)
+			return
+		}
+		if errorText != "" {
+			_ = db.UpdateSMSDeliveryState(event.MessageID, db.SMSDeliveryStateFailed, errorText, -1, event.Timestamp)
+		}
+	})
+	androidAgents.SetSessionHandler(func(deviceID string) {
+		if worker := p.GetWorker(deviceID); worker != nil {
+			_ = worker.RefreshRuntime(nil, "android_agent_snapshot")
+			_ = worker.RefreshIdentityLive(nil, "android_agent_snapshot")
+			worker.setCachedHealthy(true)
+			return
+		}
+		cfg, err := config.GetDeviceByID(deviceID)
+		if err != nil || cfg == nil || !config.IsAndroidDevice(*cfg) {
+			return
+		}
+		if _, err := p.AddWorkerFromConfig(*cfg); err != nil && !strings.Contains(err.Error(), "设备已存在") {
+			logger.Warn("Android Agent 在线后创建 Worker 失败", "device", deviceID, "err", err)
+		}
+	})
 	p.transportRecovery = NewTransportRecoveryController(p)
 	p.voWiFiHost().ConfigureAdapter(p)
 	p.voWiFiHost().ConfigureRuntimeDependencies(p.GetVoiceGateway(), vowifiDeliveryStore{}, poolVoWiFiRuntimeDispatcher{pool: p})
 
 	return p
+}
+
+func (p *Pool) AndroidAgentRegistry() *androidagent.Registry {
+	if p == nil {
+		return nil
+	}
+	return p.androidAgents
 }
 
 func (p *Pool) OnDataConnected(handler func(deviceID string)) {
@@ -274,7 +334,6 @@ func (p *Pool) assignWorkerGeneration(worker *Worker) uint64 {
 	}
 	return generation
 }
-
 
 func (p *Pool) registerWorkerStarting(worker *Worker) error {
 	if p == nil || worker == nil || strings.TrimSpace(worker.ID) == "" {

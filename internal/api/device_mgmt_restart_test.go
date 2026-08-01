@@ -74,6 +74,14 @@ func TestDeviceConfigRequiresRestartIgnoresIMEIFormatOnly(t *testing.T) {
 	}
 }
 
+func TestDeviceConfigRequiresRestartWhenDeviceKindChanges(t *testing.T) {
+	old := config.DeviceConfig{DeviceKind: config.DeviceKindModem, DeviceBackend: "at"}
+	next := config.DeviceConfig{DeviceKind: config.DeviceKindAndroid, DeviceBackend: "android"}
+	if !deviceConfigRequiresRestart(old, next) {
+		t.Fatal("device kind change must require restart")
+	}
+}
+
 func TestDeviceConfigMBIMManagedNetworkChangesRequiresRebuild(t *testing.T) {
 	base := config.DeviceConfig{
 		APN:           "internet",

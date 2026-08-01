@@ -12,7 +12,7 @@ import (
 	"sync"
 )
 
-func newHTTPProxyServer(id string, dialer *net.Dialer, stats *TrafficStats, authEnabled bool, username, password string) (*http.Server, error) {
+func newHTTPProxyServer(id string, dialer OutboundDialer, stats *TrafficStats, authEnabled bool, username, password string) (*http.Server, error) {
 	user := strings.TrimSpace(username)
 	pass := strings.TrimSpace(password)
 	if authEnabled && (user == "" || pass == "") {
@@ -41,7 +41,7 @@ func newHTTPProxyServer(id string, dialer *net.Dialer, stats *TrafficStats, auth
 
 type httpProxyHandler struct {
 	id          string
-	dialer      *net.Dialer
+	dialer      OutboundDialer
 	stats       *TrafficStats
 	transport   *http.Transport
 	authEnabled bool

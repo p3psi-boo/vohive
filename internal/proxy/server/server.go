@@ -22,6 +22,10 @@ const (
 	ModeHTTP   = "http"
 )
 
+type OutboundDialer interface {
+	DialContext(ctx context.Context, network, address string) (net.Conn, error)
+}
+
 // Server 代表单个代理服务器（SOCKS5 或 HTTP）。
 type Server struct {
 	ID         string
@@ -44,13 +48,20 @@ type Server struct {
 
 // New 创建新的代理服务器。
 func New(id, mode, listenAddr string, port int, iface string, authEnabled bool, username, password string) (*Server, error) {
+	return NewWithDialer(id, mode, listenAddr, port, iface, authEnabled, username, password, nil)
+}
+
+func NewWithDialer(id, mode, listenAddr string, port int, iface string, authEnabled bool, username, password string, outbound OutboundDialer) (*Server, error) {
 	mode = normalizeMode(mode)
 	stats := NewTrafficStats()
 	if strings.TrimSpace(listenAddr) == "" {
 		listenAddr = "0.0.0.0"
 	}
 
-	dialer := newBoundDialer(id, iface)
+	dialer := outbound
+	if dialer == nil {
+		dialer = newBoundDialer(id, iface)
+	}
 
 	out := &Server{
 		ID:         id,
@@ -89,7 +100,7 @@ func normalizeMode(mode string) string {
 	return m
 }
 
-func newSocks5Server(dialer *net.Dialer, stats *TrafficStats, authEnabled bool, username, password string) (*socks5.Server, error) {
+func newSocks5Server(dialer OutboundDialer, stats *TrafficStats, authEnabled bool, username, password string) (*socks5.Server, error) {
 	opts := []socks5.Option{
 		socks5.WithDial(func(ctx context.Context, network, addr string) (net.Conn, error) {
 			return dialOutboundConn(ctx, dialer, stats, network, addr)
@@ -135,7 +146,7 @@ func newBoundDialer(id, iface string) *net.Dialer {
 	}
 }
 
-func dialOutboundConn(ctx context.Context, dialer *net.Dialer, stats *TrafficStats, network, addr string) (net.Conn, error) {
+func dialOutboundConn(ctx context.Context, dialer OutboundDialer, stats *TrafficStats, network, addr string) (net.Conn, error) {
 	conn, err := dialer.DialContext(ctx, network, addr)
 	if err != nil {
 		return nil, err

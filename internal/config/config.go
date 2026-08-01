@@ -8,6 +8,8 @@ import (
 )
 
 const (
+	DeviceKindModem            = "modem"
+	DeviceKindAndroid          = "android"
 	ESIMTransportAT            = "at"
 	ESIMTransportQMI           = "qmi"
 	ESIMTransportMBIM          = "mbim"
@@ -16,6 +18,20 @@ const (
 	MBIMTransportDirect        = "direct"
 	DefaultWebhookTextTemplate = "{{device_label}} {{text}}"
 )
+
+func NormalizeDeviceKind(in string) string {
+	switch strings.ToLower(strings.TrimSpace(in)) {
+	case DeviceKindAndroid:
+		return DeviceKindAndroid
+	default:
+		return DeviceKindModem
+	}
+}
+
+func IsAndroidDevice(cfg DeviceConfig) bool {
+	return NormalizeDeviceKind(cfg.DeviceKind) == DeviceKindAndroid ||
+		strings.EqualFold(strings.TrimSpace(cfg.DeviceBackend), DeviceKindAndroid)
+}
 
 func NormalizeESIMTransport(in string) string {
 	switch strings.ToLower(strings.TrimSpace(in)) {
@@ -141,19 +157,25 @@ type ESIMSwitchConfig struct {
 	NASAttachTimeoutMS int `mapstructure:"nas_attach_timeout_ms"`
 }
 
+type AndroidDeviceConfig struct {
+	AgentID string `mapstructure:"agent_id"`
+}
+
 type DeviceConfig struct {
-	ID            string `mapstructure:"id"`
-	Name          string `mapstructure:"name"` // 设备显示名称
-	ModemIMEI     string `mapstructure:"modem_imei"`
-	USBPath       string `mapstructure:"-"` // Deprecated: 运行时按 IMEI 现解析,绝不从文件读取
-	ATPort        string `mapstructure:"-"` // Deprecated: 运行时解析;AT 终端用 Worker.ResolvedATPort()
-	ProxyPort     int    `mapstructure:"proxy_port"`
-	ManagePort    string `mapstructure:"-"`              // Deprecated: 运行时解析,绝不从文件读取
-	Interface     string `mapstructure:"-"`              // Deprecated: 运行时解析,绝不从文件读取
-	QMIDevice     string `mapstructure:"-"`              // Deprecated: 运行时解析,绝不从文件读取
-	ControlDevice string `mapstructure:"-"`              // Deprecated: 运行时按 IMEI 现解析,绝不从文件读取
-	MBIMTransport string `mapstructure:"mbim_transport"` // MBIM 传输: auto|proxy|direct，默认 auto
-	QMIUseProxy   bool   `mapstructure:"qmi_use_proxy"`  // 是否通过 libqmi qmi-proxy 打开 QMI 控制口
+	DeviceKind    string              `mapstructure:"device_kind"`
+	Android       AndroidDeviceConfig `mapstructure:"android"`
+	ID            string              `mapstructure:"id"`
+	Name          string              `mapstructure:"name"` // 设备显示名称
+	ModemIMEI     string              `mapstructure:"modem_imei"`
+	USBPath       string              `mapstructure:"-"` // Deprecated: 运行时按 IMEI 现解析,绝不从文件读取
+	ATPort        string              `mapstructure:"-"` // Deprecated: 运行时解析;AT 终端用 Worker.ResolvedATPort()
+	ProxyPort     int                 `mapstructure:"proxy_port"`
+	ManagePort    string              `mapstructure:"-"`              // Deprecated: 运行时解析,绝不从文件读取
+	Interface     string              `mapstructure:"-"`              // Deprecated: 运行时解析,绝不从文件读取
+	QMIDevice     string              `mapstructure:"-"`              // Deprecated: 运行时解析,绝不从文件读取
+	ControlDevice string              `mapstructure:"-"`              // Deprecated: 运行时按 IMEI 现解析,绝不从文件读取
+	MBIMTransport string              `mapstructure:"mbim_transport"` // MBIM 传输: auto|proxy|direct，默认 auto
+	QMIUseProxy   bool                `mapstructure:"qmi_use_proxy"`  // 是否通过 libqmi qmi-proxy 打开 QMI 控制口
 	// 可选：qmi-proxy abstract socket 名称和可执行文件路径。留空使用 quectel-qmi-go 默认值。
 	QMIProxyPath       string `mapstructure:"qmi_proxy_path"`
 	QMIProxyExecutable string `mapstructure:"qmi_proxy_executable"`

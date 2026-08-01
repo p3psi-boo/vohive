@@ -4,6 +4,7 @@ package backend
 var (
 	_ DeviceBackend = (*ATBackend)(nil)
 	_ DeviceBackend = (*QMIBackend)(nil)
+	_ DeviceBackend = (*AndroidBackend)(nil)
 	_ USSDProvider  = (*ATBackend)(nil)
 	_ USSDProvider  = (*QMIBackend)(nil)
 )

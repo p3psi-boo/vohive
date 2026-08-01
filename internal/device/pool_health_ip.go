@@ -104,6 +104,10 @@ func (p *Pool) runHealthCheckTick() bool {
 			w.resetHealthFailureStreak()
 			continue
 		}
+		if config.IsAndroidDevice(w.Config) {
+			// Android Worker 跟随远端 Agent 会话，不参与本机 USB/QMI 重扫。
+			continue
+		}
 
 		actBackend := ""
 		if w.Backend != nil {
@@ -177,6 +181,17 @@ func (p *Pool) runHealthCheckTick() bool {
 				isRebootRecovering := p.modemRebootRecovering[md.ID]
 				hasWorker := p.workers[md.ID] != nil
 				p.mu.RUnlock()
+
+				if config.IsAndroidDevice(md) && !hasWorker && !isRebuilding {
+					if _, online := p.androidAgents.Session(md.ID); online {
+						go func(c config.DeviceConfig) {
+							if _, err := p.AddWorkerFromConfig(c); err != nil {
+								logger.Warn("Android Agent Worker 拉起失败", "device", c.ID, "err", err)
+							}
+						}(md)
+					}
+					continue
+				}
 
 				if md.ModemIMEI != "" && !hasWorker && !isRebuilding && !isRebootRecovering {
 					isQMIConf := strings.ToLower(strings.TrimSpace(md.DeviceBackend)) == "qmi" ||

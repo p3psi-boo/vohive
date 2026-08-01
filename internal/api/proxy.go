@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/iniwex5/vohive/internal/androidagent"
 	"github.com/iniwex5/vohive/internal/config"
 	"github.com/iniwex5/vohive/internal/proxy/server"
 	"github.com/iniwex5/vohive/pkg/logger"
@@ -40,6 +41,7 @@ type proxyDeviceDTO struct {
 	ID        string `json:"id"`
 	Name      string `json:"name"`
 	Interface string `json:"interface"`
+	Kind      string `json:"kind,omitempty"`
 }
 
 // proxyConfigRequest 更新代理配置请求
@@ -78,6 +80,7 @@ func (s *Server) handleProxyOverview(c *gin.Context) {
 				ID:        d.ID,
 				Name:      name,
 				Interface: d.Interface,
+				Kind:      config.NormalizeDeviceKind(d.DeviceKind),
 			})
 		}
 	}
@@ -274,9 +277,15 @@ func (s *Server) SyncProxyConfigs() error {
 
 func (s *Server) buildProxyConfigs(ctx context.Context) ([]server.InstanceConfig, error) {
 	deviceInterface := make(map[string]string)
+	androidDevices := make(map[string]bool)
 	{
 		managed := config.ListDevices()
 		for _, d := range managed {
+			if config.IsAndroidDevice(d) {
+				androidDevices[d.ID] = true
+				deviceInterface[d.ID] = "android:" + d.ID
+				continue
+			}
 			iface := strings.TrimSpace(d.Interface)
 			if iface != "" {
 				deviceInterface[d.ID] = iface
@@ -342,6 +351,12 @@ func (s *Server) buildProxyConfigs(ctx context.Context) ([]server.InstanceConfig
 			AuthEnabled: inst.AuthEnabled,
 			Username:    inst.Username,
 			Password:    inst.Password,
+			Dialer: func() server.OutboundDialer {
+				if androidDevices[inst.DeviceID] {
+					return androidagent.NewDialer(s.androidAgents, inst.DeviceID)
+				}
+				return nil
+			}(),
 		})
 	}
 	return out, nil

@@ -30,7 +30,9 @@ func TestCreateRejectsPrivateAndNonHTTPSURLs(t *testing.T) {
 
 func TestCreateAllowsPublicHTTPS(t *testing.T) {
 	b := New(Config{})
-	s, err := b.Create(context.Background(), Request{URL: "https://attdashboard.wireless.att.com/softphone/primary/reseller/r017"})
+	// Use a documentation-range literal so local split-DNS cannot make this
+	// validation-only test resolve a public hostname to a private address.
+	s, err := b.Create(context.Background(), Request{URL: "https://203.0.113.10/softphone/primary/reseller/r017"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -208,7 +210,7 @@ func TestSessionExpires(t *testing.T) {
 		TTL: time.Minute,
 		Now: func() time.Time { return now },
 	})
-	s, err := b.Create(context.Background(), Request{URL: "https://example.com/"})
+	s, err := b.Create(context.Background(), Request{URL: "https://203.0.113.10/"})
 	if err != nil {
 		t.Fatal(err)
 	}

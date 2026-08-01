@@ -21,7 +21,6 @@ import {
   shouldShowEsimRefreshIcon
 } from './deviceEsimNotifications'
 import {
-  Add24Regular,
   Alert24Regular,
   ArrowDownload24Regular,
   ArrowSync24Regular,

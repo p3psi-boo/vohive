@@ -3,6 +3,9 @@ package api
 import "github.com/iniwex5/vohive/internal/config"
 
 func deviceConfigRequiresRestart(old config.DeviceConfig, next config.DeviceConfig) bool {
+	if config.NormalizeDeviceKind(old.DeviceKind) != config.NormalizeDeviceKind(next.DeviceKind) {
+		return true
+	}
 	if config.NormalizeIMEI(old.ModemIMEI) != config.NormalizeIMEI(next.ModemIMEI) {
 		return true
 	}

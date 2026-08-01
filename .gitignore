@@ -21,6 +21,11 @@
 /internal/web/dist/
 /dist/*
 
+# Android Agent local build state
+/android-agent/.gradle/
+/android-agent/**/build/
+/android-agent/local.properties
+
 # IDE 和编辑器
 .idea/
 .vscode/

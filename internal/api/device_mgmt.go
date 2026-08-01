@@ -27,6 +27,8 @@ import (
 )
 
 type deviceConfigDTO struct {
+	DeviceKind            string  `json:"device_kind,omitempty"`
+	AndroidAgentID        string  `json:"android_agent_id,omitempty"`
 	ID                    string  `json:"id"`
 	Name                  string  `json:"name"`
 	ModemIMEI             string  `json:"modem_imei"`
@@ -56,6 +58,8 @@ type deviceConfigDTO struct {
 
 func deviceConfigToDTO(c config.DeviceConfig) deviceConfigDTO {
 	return deviceConfigDTO{
+		DeviceKind:            config.NormalizeDeviceKind(c.DeviceKind),
+		AndroidAgentID:        c.Android.AgentID,
 		ID:                    c.ID,
 		Name:                  c.Name,
 		ModemIMEI:             c.ModemIMEI,
@@ -96,10 +100,22 @@ func deviceConfigFromDTOWithBase(d deviceConfigDTO, base *config.DeviceConfig) c
 	qmiUseProxy := false
 	qmiProxyPath := ""
 	qmiProxyExecutable := ""
+	deviceKind := config.NormalizeDeviceKind(d.DeviceKind)
+	androidAgentID := strings.TrimSpace(d.AndroidAgentID)
+	deviceBackend := strings.TrimSpace(d.DeviceBackend)
 	if base != nil {
 		qmiUseProxy = base.QMIUseProxy
 		qmiProxyPath = base.QMIProxyPath
 		qmiProxyExecutable = base.QMIProxyExecutable
+		if strings.TrimSpace(d.DeviceKind) == "" {
+			deviceKind = config.NormalizeDeviceKind(base.DeviceKind)
+		}
+		if androidAgentID == "" {
+			androidAgentID = strings.TrimSpace(base.Android.AgentID)
+		}
+		if deviceBackend == "" {
+			deviceBackend = base.DeviceBackend
+		}
 	}
 	if d.QMIUseProxy != nil {
 		qmiUseProxy = *d.QMIUseProxy
@@ -111,6 +127,8 @@ func deviceConfigFromDTOWithBase(d deviceConfigDTO, base *config.DeviceConfig) c
 		qmiProxyExecutable = strings.TrimSpace(*d.QMIProxyExecutable)
 	}
 	return config.DeviceConfig{
+		DeviceKind:            deviceKind,
+		Android:               config.AndroidDeviceConfig{AgentID: androidAgentID},
 		ID:                    id,
 		Name:                  strings.TrimSpace(d.Name),
 		ModemIMEI:             strings.TrimSpace(d.ModemIMEI),
@@ -135,7 +153,7 @@ func deviceConfigFromDTOWithBase(d deviceConfigDTO, base *config.DeviceConfig) c
 		IPVersion:             strings.TrimSpace(d.IPVersion),
 		NetworkEnabled:        d.NetworkEnabled,
 		VoWiFiEnabled:         d.VoWiFiEnabled,
-		DeviceBackend:         d.DeviceBackend,
+		DeviceBackend:         deviceBackend,
 	}
 }
 
@@ -1218,6 +1236,17 @@ func deviceConfigForAdd(cfg config.DeviceConfig) config.DeviceConfig {
 	cfg.VoWiFiEnabled = false
 	cfg.AirplaneEnabled = false
 	cfg.SMSEnabled = true
+	if config.IsAndroidDevice(cfg) {
+		cfg.DeviceKind = config.DeviceKindAndroid
+		cfg.DeviceBackend = backend.BackendAndroid
+		cfg.ModemIMEI = ""
+		cfg.USBPath = ""
+		cfg.ATPort = ""
+		cfg.ManagePort = ""
+		cfg.Interface = ""
+		cfg.ControlDevice = ""
+		cfg.QMIDevice = ""
+	}
 	return cfg
 }
 
@@ -1250,6 +1279,9 @@ func detectDeviceBindingConflictInList(cfg config.DeviceConfig, excludeID string
 	keys := make([]key, 0, 5)
 	if v := strings.TrimSpace(cfg.ModemIMEI); v != "" {
 		keys = append(keys, key{field: "modem_imei", value: v})
+	}
+	if v := strings.TrimSpace(cfg.Android.AgentID); v != "" {
+		keys = append(keys, key{field: "android_agent_id", value: v})
 	}
 	if v := strings.TrimSpace(cfg.ControlDevice); v != "" {
 		keys = append(keys, key{field: "control_device", value: v})
@@ -1295,6 +1327,10 @@ func detectDeviceBindingConflictInList(cfg config.DeviceConfig, excludeID string
 				}
 			case "at_port":
 				if strings.TrimSpace(existing.ATPort) == k.value {
+					return &deviceBindingConflict{Field: k.field, Value: k.value, OtherID: existingID}
+				}
+			case "android_agent_id":
+				if strings.TrimSpace(existing.Android.AgentID) == k.value {
 					return &deviceBindingConflict{Field: k.field, Value: k.value, OtherID: existingID}
 				}
 			}
@@ -1360,6 +1396,9 @@ func (s *Server) handleDeviceMgmtUpdateDevice(c *gin.Context) {
 		logger.Error("写入设备配置失败", "err", err)
 		c.JSON(http.StatusInternalServerError, gin.H{"status": "error", "message": "写入配置失败: " + err.Error()})
 		return
+	}
+	if config.IsAndroidDevice(oldCfg) && strings.TrimSpace(oldCfg.Android.AgentID) != strings.TrimSpace(newCfg.Android.AgentID) && s.androidAgents != nil {
+		s.androidAgents.Disconnect(id)
 	}
 
 	worker := s.pool.GetWorker(id)
@@ -1458,10 +1497,13 @@ type addDeviceRequest struct {
 func validateDeviceBackendConfig(cfg config.DeviceConfig) error {
 	backend := strings.ToLower(strings.TrimSpace(cfg.DeviceBackend))
 	switch backend {
-	case "", "at", "qmi", "mbim":
+	case "", "at", "qmi", "mbim", "android":
 		// 合法值
 	default:
-		return fmt.Errorf("不支持的 device_backend: %q，可选值: at, qmi, mbim", backend)
+		return fmt.Errorf("不支持的 device_backend: %q，可选值: at, qmi, mbim, android", backend)
+	}
+	if config.IsAndroidDevice(cfg) && strings.TrimSpace(cfg.Android.AgentID) == "" {
+		return fmt.Errorf("Android 设备必须填写 android_agent_id")
 	}
 	return nil
 }
@@ -1507,7 +1549,9 @@ func (s *Server) handleDeviceMgmtAddDevice(c *gin.Context) {
 		return
 	}
 	// MBIM 设备使用 MBIM DeviceCaps 探测 IMEI，非 MBIM 设备使用 QMI 探测
-	if strings.ToLower(strings.TrimSpace(newCfg.DeviceBackend)) == "mbim" {
+	if config.IsAndroidDevice(newCfg) {
+		// Android Agent 使用 agent_id 绑定，不探测本机 USB/QMI 设备。
+	} else if strings.ToLower(strings.TrimSpace(newCfg.DeviceBackend)) == "mbim" {
 		if config.NormalizeIMEI(newCfg.ModemIMEI) == "" && strings.TrimSpace(newCfg.ControlDevice) != "" {
 			if mbimIMEI, err := device.ProbeIMEIViaMBIM(newCfg.ControlDevice); err == nil && mbimIMEI != "" {
 				newCfg.ModemIMEI = mbimIMEI
@@ -1530,6 +1574,15 @@ func (s *Server) handleDeviceMgmtAddDevice(c *gin.Context) {
 
 	if _, err := s.pool.AddWorkerFromConfig(newCfg); err != nil {
 		logger.Warn("设备配置已添加，但启动运行时设备失败", "device_id", newCfg.ID, "err", err)
+		if config.IsAndroidDevice(newCfg) {
+			c.JSON(http.StatusOK, gin.H{
+				"status":           "ok",
+				"started":          false,
+				"requires_restart": false,
+				"warning":          "Android 设备配置已添加，请生成配对 Token；Agent 上线后会自动启动",
+			})
+			return
+		}
 		c.JSON(http.StatusOK, gin.H{
 			"status":           "ok",
 			"started":          false,

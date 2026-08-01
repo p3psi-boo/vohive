@@ -128,6 +128,8 @@ export type DeviceMgmtListItem = {
 }
 
 export type DeviceConfigDTO = {
+  device_kind?: 'modem' | 'android'
+  android_agent_id?: string
   id: string
   name: string
   interface: string
@@ -135,7 +137,7 @@ export type DeviceConfigDTO = {
   usb_path?: string
   apn?: string
   ip_version?: 'v4' | 'v6' | 'v4v6'
-  esim_transport?: 'at' | 'qmi'
+  esim_transport?: 'at' | 'qmi' | 'mbim'
   network_enabled?: boolean
   at_port: string
   control_device: string
@@ -143,10 +145,116 @@ export type DeviceConfigDTO = {
   qmi_proxy_path?: string
   qmi_proxy_executable?: string
   vowifi_enabled?: boolean
-  device_backend?: 'at' | 'qmi' | 'mbim'
+  device_backend?: 'at' | 'qmi' | 'mbim' | 'android'
   operator_selection_mode?: string
   operator_selection_plmn?: string
   operator_selection_rat?: string
+}
+
+export type AndroidSubscription = {
+  subscription_id: number
+  slot_index: number
+  port_index?: number
+  carrier_name?: string
+  display_name?: string
+  iccid?: string
+  imsi?: string
+  imei?: string
+  msisdn?: string
+  mcc?: string
+  mnc?: string
+  country_iso?: string
+  embedded: boolean
+  opportunistic: boolean
+  active: boolean
+  selected: boolean
+  default_data: boolean
+  default_sms: boolean
+  default_voice: boolean
+}
+
+export type AndroidAgentSnapshot = {
+  imei?: string
+  imsi?: string
+  iccid?: string
+  msisdn?: string
+  firmware?: string
+  baseband?: string
+  operator?: string
+  mcc?: number
+  mnc?: number
+  network_mode?: string
+  signal_dbm?: number
+  signal_rsrp?: number
+  signal_rsrq?: number
+  signal_sinr?: number
+  nr5g_rsrp?: number
+  nr5g_rsrq?: number
+  nr5g_sinr?: number
+  reg_status?: number
+  reg_status_text?: string
+  service_state?: number
+  registration_details?: AndroidRegistrationDetail[]
+  ps_attached?: boolean
+  roaming?: boolean
+  emergency_only?: boolean
+  sim_inserted?: boolean
+  data_connected?: boolean
+  private_ip?: string
+  private_ipv6?: string
+  battery_pct?: number
+  battery_charging?: boolean
+  selected_subscription_id?: number
+  subscriptions?: AndroidSubscription[]
+  esim_supported?: boolean
+  esim_enabled?: boolean
+  eid?: string
+  access?: Record<string, boolean>
+  esim_operation?: AndroidESIMOperation
+  updated_at?: string
+}
+
+export type AndroidESIMOperation = {
+  operation?: string
+  state?: string
+  error?: string
+  result_code?: number
+  detailed_code?: number
+  subscription_id?: number
+  port_index?: number
+  timestamp?: string
+}
+
+export type AndroidRegistrationDetail = {
+  domain?: string
+  transport?: string
+  registered: boolean
+  roaming: boolean
+  searching: boolean
+  reject_cause?: number
+  registered_plmn?: string
+  network_mode?: string
+  available_services?: number[]
+  cell_identity?: string
+}
+
+export type AndroidAgentStatus = {
+  status: string
+  online: boolean
+  device_id: string
+  agent_id: string
+  snapshot: AndroidAgentSnapshot
+}
+
+export type AndroidSMSMessage = {
+  index: number
+  sender?: string
+  recipient?: string
+  content: string
+  timestamp?: string
+  type: number
+  tag: number
+  subscription_id?: number
 }
 
 export type PNNRecord = {

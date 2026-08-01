@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -114,6 +115,13 @@ func Init(dbPath string) error {
 	if dsn == "" {
 		dsn = dbPath
 	}
+	if dsn != "" && dsn != ":memory:" && !strings.HasPrefix(dsn, "file:") {
+		if dir := filepath.Dir(dsn); dir != "." && dir != "" {
+			if err := os.MkdirAll(dir, 0o755); err != nil {
+				return fmt.Errorf("create database directory: %w", err)
+			}
+		}
+	}
 	driverName := strings.TrimSpace(os.Getenv("VOHIVE_SQLITE_DRIVER"))
 	if driverName == "" {
 		driverName = "modernc"
@@ -163,6 +171,9 @@ func Init(dbPath string) error {
 		&TrafficWeek{},
 		&TrafficMonth{},
 	); err != nil {
+		return err
+	}
+	if err := migrateSMSDeliveryPartUniqueIndex(DB); err != nil {
 		return err
 	}
 	if err := RunICCIDReKeyMigration(DB); err != nil {

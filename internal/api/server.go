@@ -19,6 +19,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/iniwex5/vohive/internal/androidagent"
+	"github.com/iniwex5/vohive/internal/backend"
 	"github.com/iniwex5/vohive/internal/config"
 	"github.com/iniwex5/vohive/internal/data/repo"
 	"github.com/iniwex5/vohive/internal/db"
@@ -66,20 +68,21 @@ type loginAttempt struct {
 
 // Server 是 API 服务器的核心结构
 type Server struct {
-	cfg         config.ServerConfig // HTTP 服务器配置
-	fullCfg     *config.Config      // 完整配置引用
-	pool        *device.Pool        // 设备工作器池
-	auth        config.WebConfig    // Web 认证配置
-	fs          http.FileSystem     // 静态文件系统
-	configPath  string              // 配置文件路径
-	proxyMgr    *server.Manager     // 代理实例管理器
-	trafficRT   realtimeTrafficSubscriber
-	proxyRepo   repo.ProxyInstanceRepository
-	proxySyncMu sync.Mutex
-	mcpKeyMu    sync.RWMutex
-	voiceGW     *voicehost.Gateway
-	notifyMgr   *notify.Manager
-	websheets   *vwebsheet.Broker
+	cfg           config.ServerConfig // HTTP 服务器配置
+	fullCfg       *config.Config      // 完整配置引用
+	pool          *device.Pool        // 设备工作器池
+	auth          config.WebConfig    // Web 认证配置
+	fs            http.FileSystem     // 静态文件系统
+	configPath    string              // 配置文件路径
+	proxyMgr      *server.Manager     // 代理实例管理器
+	trafficRT     realtimeTrafficSubscriber
+	proxyRepo     repo.ProxyInstanceRepository
+	proxySyncMu   sync.Mutex
+	mcpKeyMu      sync.RWMutex
+	voiceGW       *voicehost.Gateway
+	notifyMgr     *notify.Manager
+	websheets     *vwebsheet.Broker
+	androidAgents *androidagent.Registry
 
 	httpSrvMu sync.Mutex
 	httpSrv   *http.Server
@@ -117,6 +120,17 @@ func New(cfg *config.Config, pool *device.Pool, fs http.FileSystem, proxyMgr *se
 		websheets:     vwebsheet.New(vwebsheet.Config{BasePath: "/api/websheets"}),
 		loginAttempts: make(map[string]loginAttempt),
 		shutdownCh:    make(chan struct{}),
+	}
+	if pool != nil {
+		s.androidAgents = pool.AndroidAgentRegistry()
+	}
+	if s.androidAgents != nil {
+		s.androidAgents.SetSigningSecret([]byte(cfg.Web.Password))
+		s.androidAgents.SetDeviceAuthorizer(func(deviceID, agentID string) bool {
+			dev, err := config.GetDeviceByID(strings.TrimSpace(deviceID))
+			return err == nil && dev != nil && config.IsAndroidDevice(*dev) &&
+				strings.TrimSpace(dev.Android.AgentID) == strings.TrimSpace(agentID)
+		})
 	}
 
 	return s
@@ -232,6 +246,7 @@ func (s *Server) newRouter() *gin.Engine {
 	api.GET("/docs", s.handleAPIDocs)
 	api.GET("/docs/assets/*filepath", s.handleDocsAsset)
 	api.POST("/auth/login", s.handleLogin)
+	api.GET("/android-agent/connect", s.handleAndroidAgentConnect)
 	api.POST("/rotateip", s.handleRotate)
 	api.OPTIONS("/logs/stream", s.handleLogStreamOptions)
 	s.registerWebsheetRoutes(api)
@@ -290,8 +305,18 @@ func (s *Server) newRouter() *gin.Engine {
 		api.POST("/devices/:device_id/actions/ussd", s.handleDeviceMgmtExecuteUSSD)            // 执行 USSD 指令
 		api.POST("/devices/:device_id/actions/ussd/continue", s.handleDeviceMgmtContinueUSSD)  // USSD 续轮输入（多轮交互）
 		api.POST("/devices/:device_id/actions/ussd/cancel", s.handleDeviceMgmtCancelUSSD)      // 取消 USSD 会话
-		api.PATCH("/devices/:device_id/usbnet-mode", s.handleDeviceMgmtSetUSBNetMode)          // 设置 USBNET 模式
-		api.PATCH("/devices/:device_id/flight-mode", s.handleDeviceMgmtSetFlightMode)          // 切换飞行模式
+		api.POST("/devices/:device_id/android-agent/pairing-token", s.handleAndroidAgentPairingToken)
+		api.GET("/devices/:device_id/android-agent/status", s.handleAndroidAgentStatus)
+		api.GET("/devices/:device_id/android-agent/subscriptions", s.handleAndroidAgentSubscriptions)
+		api.POST("/devices/:device_id/android-agent/subscriptions/select", s.handleAndroidAgentSelectSubscription)
+		api.POST("/devices/:device_id/android-agent/esim/switch", s.handleAndroidAgentSwitchESIM)
+		api.POST("/devices/:device_id/android-agent/esim/settings", s.handleAndroidAgentOpenESIMSettings)
+		api.GET("/devices/:device_id/android-agent/sms", s.handleAndroidAgentListSMS)
+		api.GET("/devices/:device_id/android-agent/sms/:index", s.handleAndroidAgentReadSMS)
+		api.DELETE("/devices/:device_id/android-agent/sms/:index", s.handleAndroidAgentDeleteSMS)
+		api.DELETE("/devices/:device_id/android-agent/sms", s.handleAndroidAgentDeleteAllSMS)
+		api.PATCH("/devices/:device_id/usbnet-mode", s.handleDeviceMgmtSetUSBNetMode) // 设置 USBNET 模式
+		api.PATCH("/devices/:device_id/flight-mode", s.handleDeviceMgmtSetFlightMode) // 切换飞行模式
 		api.PATCH("/devices/:device_id/network", s.handleDeviceNetworkPatch)
 
 		api.GET("/cards/policies", s.handleListCardPolicies)
@@ -948,11 +973,12 @@ func (s *Server) handleHealth(c *gin.Context) {
 }
 
 type sendSMSRequest struct {
-	DeviceID string `json:"device_id"`
-	IMSI     string `json:"imsi"`
-	Phone    string `json:"phone" binding:"required"`
-	Message  string `json:"message" binding:"required"`
-	Encoding string `json:"encoding"`
+	DeviceID       string `json:"device_id"`
+	IMSI           string `json:"imsi"`
+	Phone          string `json:"phone" binding:"required"`
+	Message        string `json:"message" binding:"required"`
+	Encoding       string `json:"encoding"`
+	SubscriptionID *int   `json:"subscription_id,omitempty"`
 }
 
 type sendSMSResult struct {
@@ -1016,6 +1042,13 @@ func (s *Server) sendSMS(ctx context.Context, req sendSMSRequest) (sendSMSResult
 	}
 
 	imsi = worker.GetIMSI()
+	if androidBackend, ok := worker.Backend.(*backend.AndroidBackend); ok && strings.TrimSpace(imsi) == "" {
+		subscriptionID := -1
+		if req.SubscriptionID != nil {
+			subscriptionID = *req.SubscriptionID
+		}
+		imsi = androidBackend.SMSIdentity(subscriptionID)
+	}
 	messageID := ""
 	partsTotal := 1
 	deliveryState := "acked"
@@ -1042,16 +1075,48 @@ func (s *Server) sendSMS(ctx context.Context, req sendSMSRequest) (sendSMSResult
 			}, http.StatusInternalServerError, fmt.Errorf("VoWiFi 短信发送失败: %w", err)
 		}
 	} else {
-		if err := worker.SendSMSWithOptions(req.Phone, req.Message, sendOpts); err != nil {
+		var sendErr error
+		if androidBackend, ok := worker.Backend.(*backend.AndroidBackend); ok {
+			var outcome map[string]any
+			if req.SubscriptionID != nil {
+				outcome, sendErr = androidBackend.SendSMSOnSubscription(ctx, *req.SubscriptionID, req.Phone, req.Message)
+			} else {
+				outcome, sendErr = androidBackend.SendSMSWithResult(ctx, req.Phone, req.Message)
+			}
+			if sendErr == nil {
+				messageID, _ = outcome["message_id"].(string)
+				if value := resultInt(outcome["parts_total"]); value > 0 {
+					partsTotal = value
+				}
+				if value, _ := outcome["state"].(string); strings.TrimSpace(value) != "" {
+					deliveryState = value
+				} else {
+					deliveryState = db.SMSDeliveryStatePending
+				}
+			}
+		} else if req.SubscriptionID != nil {
+			sendErr = errors.New("subscription_id 仅适用于 Android Agent 设备")
+		} else {
+			sendErr = worker.SendSMSWithOptions(req.Phone, req.Message, sendOpts)
+		}
+		if sendErr != nil {
 			if imsi != "" {
 				_ = db.SaveSMS(imsi, worker.ID, req.Phone, req.Message, 2, 3, time.Now())
 			}
 			return sendSMSResult{
 				Status:  "error",
-				Message: "发送失败: " + err.Error(),
+				Message: "发送失败: " + sendErr.Error(),
 				Device:  deviceID,
 				Phone:   req.Phone,
-			}, http.StatusInternalServerError, fmt.Errorf("发送失败: %w", err)
+			}, http.StatusInternalServerError, fmt.Errorf("发送失败: %w", sendErr)
+		}
+		if messageID != "" {
+			now := time.Now()
+			_ = db.CreateSMSDelivery(messageID, imsi, deviceID, req.Phone, req.Message, partsTotal, now)
+			for part := 1; part <= partsTotal; part++ {
+				_ = db.UpsertSMSDeliveryPart(messageID, part, "", -1, db.SMSDeliveryPartStatePending, now)
+			}
+			_ = db.RecomputeSMSDelivery(messageID, now)
 		}
 		if imsi != "" {
 			_ = db.SaveSMS(imsi, worker.ID, req.Phone, req.Message, 2, 2, time.Now())
@@ -1098,6 +1163,10 @@ func (s *Server) handleSMSDelivery(c *gin.Context) {
 		c.JSON(http.StatusServiceUnavailable, gin.H{"status": "error", "message": "服务未就绪"})
 		return
 	}
+	if status, err := db.GetSMSDeliveryStatus(messageID); err == nil && status != nil {
+		c.JSON(http.StatusOK, gin.H{"status": "ok", "delivery": status})
+		return
+	}
 	services := s.pool.GetAllVoWiFiApps()
 	for _, svc := range services {
 		if svc == nil {
@@ -1111,6 +1180,22 @@ func (s *Server) handleSMSDelivery(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusNotFound, gin.H{"status": "error", "message": "未找到对应短信投递记录"})
+}
+
+func resultInt(value any) int {
+	switch n := value.(type) {
+	case int:
+		return n
+	case int64:
+		return int(n)
+	case float64:
+		return int(n)
+	case string:
+		parsed, _ := strconv.Atoi(strings.TrimSpace(n))
+		return parsed
+	default:
+		return 0
+	}
 }
 
 // handleVoWiFiEnable 为指定设备启用 VoWiFi

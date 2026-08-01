@@ -20,6 +20,7 @@ type InstanceConfig struct {
 	AuthEnabled bool
 	Username    string
 	Password    string
+	Dialer      OutboundDialer
 }
 
 // InstanceStatus 表示代理实例状态。
@@ -171,7 +172,7 @@ func (m *Manager) Start(ctx context.Context, id string) error {
 	}
 	m.mu.Unlock()
 
-	srv, err := New(id, cfg.Mode, cfg.ListenAddr, cfg.ListenPort, cfg.Interface, cfg.AuthEnabled, cfg.Username, cfg.Password)
+	srv, err := NewWithDialer(id, cfg.Mode, cfg.ListenAddr, cfg.ListenPort, cfg.Interface, cfg.AuthEnabled, cfg.Username, cfg.Password, cfg.Dialer)
 	if err != nil {
 		m.recordError(id, err)
 		return err

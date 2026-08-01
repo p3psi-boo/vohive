@@ -66,3 +66,47 @@ func TestAddDeviceInFileDoesNotPersistRuntimePaths(t *testing.T) {
 		t.Fatalf("runtime paths must not be persisted, got: %+v", d)
 	}
 }
+
+func TestAndroidDeviceBindingRoundTrip(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.yaml")
+	if err := os.WriteFile(path, []byte("devices: []\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	want := DeviceConfig{
+		DeviceKind:    DeviceKindAndroid,
+		Android:       AndroidDeviceConfig{AgentID: "agent-123"},
+		ID:            "android-1",
+		Name:          "Pixel",
+		DeviceBackend: "android",
+		SMSEnabled:    true,
+	}
+	if err := AddDeviceInFile(path, want); err != nil {
+		t.Fatalf("AddDeviceInFile: %v", err)
+	}
+	got, err := Load(path)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if len(got.Devices) != 1 {
+		t.Fatalf("devices=%d, want 1", len(got.Devices))
+	}
+	device := got.Devices[0]
+	if !IsAndroidDevice(device) || device.Android.AgentID != "agent-123" || device.DeviceBackend != "android" {
+		t.Fatalf("Android binding did not round-trip: %+v", device)
+	}
+	if device.ModemIMEI != "" || device.ControlDevice != "" || device.Interface != "" {
+		t.Fatalf("Android binding persisted modem runtime identity: %+v", device)
+	}
+
+	want.Android.AgentID = "agent-456"
+	if err := UpdateDeviceInFile(path, want.ID, want); err != nil {
+		t.Fatalf("UpdateDeviceInFile: %v", err)
+	}
+	got, err = Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Devices[0].Android.AgentID != "agent-456" {
+		t.Fatalf("updated agent ID=%q", got.Devices[0].Android.AgentID)
+	}
+}

@@ -44,8 +44,8 @@ func (SMSDelivery) TableName() string { return "sms_delivery" }
 // SMSDeliveryPart 记录一条上行短信分片(part 级别)的发送与回执状态。
 type SMSDeliveryPart struct {
 	ID        uint       `gorm:"primaryKey" json:"id"`
-	MessageID string     `gorm:"column:message_id;index:idx_sms_delivery_part_mid_no,priority:1;index" json:"message_id"`
-	PartNo    int        `gorm:"column:part_no;index:idx_sms_delivery_part_mid_no,priority:2" json:"part_no"`
+	MessageID string     `gorm:"column:message_id;uniqueIndex:idx_sms_delivery_part_mid_no,priority:1;index" json:"message_id"`
+	PartNo    int        `gorm:"column:part_no;uniqueIndex:idx_sms_delivery_part_mid_no,priority:2" json:"part_no"`
 	CallID    string     `gorm:"column:call_id;index" json:"call_id"`
 	InReplyTo string     `gorm:"column:in_reply_to;index" json:"in_reply_to"`
 	RPMR      int        `gorm:"column:rp_mr;index" json:"rp_mr"`
@@ -60,6 +60,34 @@ type SMSDeliveryPart struct {
 }
 
 func (SMSDeliveryPart) TableName() string { return "sms_delivery_part" }
+
+// migrateSMSDeliveryPartUniqueIndex repairs databases created before the
+// message_id/part_no index became unique. The uniqueness guarantee is needed
+// by the SQLite ON CONFLICT upsert below.
+func migrateSMSDeliveryPartUniqueIndex(db *gorm.DB) error {
+	if db == nil || !db.Migrator().HasTable(&SMSDeliveryPart{}) {
+		return nil
+	}
+	return db.Transaction(func(tx *gorm.DB) error {
+		if err := tx.Exec(`
+			DELETE FROM sms_delivery_part
+			WHERE id NOT IN (
+				SELECT kept_id FROM (
+					SELECT MAX(id) AS kept_id
+					FROM sms_delivery_part
+					GROUP BY message_id, part_no
+				)
+			)`).Error; err != nil {
+			return err
+		}
+		if err := tx.Exec(`DROP INDEX IF EXISTS idx_sms_delivery_part_mid_no`).Error; err != nil {
+			return err
+		}
+		return tx.Exec(`
+			CREATE UNIQUE INDEX idx_sms_delivery_part_mid_no
+			ON sms_delivery_part(message_id, part_no)`).Error
+	})
+}
 
 // SMSDeliveryStatus 用于 API 返回 message 及其分片状态。
 type SMSDeliveryStatus struct {

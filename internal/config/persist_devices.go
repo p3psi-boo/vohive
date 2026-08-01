@@ -31,6 +31,15 @@ func UpdateDeviceInFile(path string, deviceID string, newDevice DeviceConfig) er
 
 		setMapScalar(n, "id", newDevice.ID)
 		setMapScalar(n, "name", newDevice.Name)
+		if IsAndroidDevice(newDevice) {
+			setMapScalar(n, "device_kind", DeviceKindAndroid)
+			androidNode := &yaml.Node{Kind: yaml.MappingNode, Tag: "!!map"}
+			setMapScalar(androidNode, "agent_id", strings.TrimSpace(newDevice.Android.AgentID))
+			setMapNode(n, "android", androidNode)
+		} else {
+			deleteMapKey(n, "device_kind")
+			deleteMapKey(n, "android")
+		}
 		if newDevice.ModemIMEI != "" {
 			setMapScalar(n, "modem_imei", newDevice.ModemIMEI)
 		} else {
@@ -163,6 +172,12 @@ func findDeviceNodeByID(devices *yaml.Node, id string) *yaml.Node {
 func deviceConfigToNode(d DeviceConfig) *yaml.Node {
 	m := &yaml.Node{Kind: yaml.MappingNode, Tag: "!!map"}
 	appendMapScalar(m, "id", d.ID)
+	if IsAndroidDevice(d) {
+		appendMapScalar(m, "device_kind", DeviceKindAndroid)
+		androidNode := &yaml.Node{Kind: yaml.MappingNode, Tag: "!!map"}
+		appendMapScalar(androidNode, "agent_id", strings.TrimSpace(d.Android.AgentID))
+		setMapNode(m, "android", androidNode)
+	}
 	if d.Name != "" {
 		appendMapScalar(m, "name", d.Name)
 	}

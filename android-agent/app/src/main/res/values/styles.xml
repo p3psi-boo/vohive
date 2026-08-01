@@ -1,0 +1,3 @@
+<resources>
+    <style name="AgentNoDisplay" parent="android:style/Theme.NoDisplay" />
+</resources>

@@ -99,6 +99,8 @@ const addDialogOpen = ref(false)
 const addSelected = ref<DiscoveredDevice | null>(null)
 const addSaving = ref(false)
 const addConfig = ref<DeviceConfigDTO>({
+  device_kind: 'modem',
+  android_agent_id: '',
   id: '',
   name: '',
   interface: '',
@@ -165,6 +167,12 @@ const selectedListItem = computed<DeviceMgmtListItem | null>(() => {
 
 const selectedDevice = computed<DeviceOverviewItem | null>(() => {
   return selectedDetail.value
+})
+
+const selectedIsAndroid = computed(() => {
+  return editConfig.value?.device_kind === 'android'
+    || editConfig.value?.device_backend === 'android'
+    || selectedDevice.value?.backend_mode === 'android'
 })
 
 const RADIO_LIVE_GRACE_MS = 3000
@@ -1013,6 +1021,8 @@ function openAddDialog() {
   addDialogOpen.value = true
   addSelected.value = null
   addConfig.value = {
+    device_kind: 'modem',
+    android_agent_id: '',
     id: '',
     name: '',
     interface: '',
@@ -1042,6 +1052,8 @@ async function refreshDiscoveredForAdd() {
 
 function applyDiscoveredToAddConfig(d: DiscoveredDevice | null) {
   if (!d) return
+  addConfig.value.device_kind = 'modem'
+  addConfig.value.android_agent_id = ''
   addConfig.value.interface = d.net_interface || ''
   addConfig.value.at_port = d.at_port || ''
   addConfig.value.control_device = d.control_path || ''
@@ -1070,11 +1082,28 @@ function selectDiscoveredForAdd(d: DiscoveredDevice) {
 async function addDevice() {
   addSaving.value = true
   try {
-    if (!addSelected.value) {
+    const addingAndroid = addConfig.value.device_kind === 'android' || addConfig.value.device_backend === 'android'
+    if (addingAndroid) {
+      addConfig.value.device_kind = 'android'
+      addConfig.value.device_backend = 'android'
+      addConfig.value.modem_imei = String(addConfig.value.android_agent_id || '').trim()
+      addConfig.value.interface = ''
+      addConfig.value.at_port = ''
+      addConfig.value.control_device = ''
+      addConfig.value.usb_path = ''
+      if (!String(addConfig.value.id || '').trim()) {
+        ElMessage.warning('请填写 Android 设备 ID')
+        return
+      }
+      if (!String(addConfig.value.android_agent_id || '').trim()) {
+        ElMessage.warning('请填写 Android Agent ID')
+        return
+      }
+    } else if (!addSelected.value) {
       ElMessage.warning('请选择一个未配置设备')
       return
     }
-    applyDiscoveredToAddConfig(addSelected.value)
+    if (!addingAndroid) applyDiscoveredToAddConfig(addSelected.value)
     const result = await devicesService.addManaged(addConfig.value)
     if (!result.ok) throw new Error(result.error.message || '添加失败')
     const warning = result.data.warning
@@ -1149,6 +1178,11 @@ watch(activeTab, (tab, prevTab) => {
   if (tab === 'overview' && prevTab !== 'overview') {
     refreshCurrentDeviceTrafficAnalysis()
   }
+})
+
+watch(selectedIsAndroid, (android) => {
+  if (!android || activeTab.value === 'overview' || activeTab.value === 'config') return
+  activeTab.value = 'config'
 })
 
 onMounted(() => {
@@ -1344,7 +1378,7 @@ usePollingScheduler(async () => {
                 />
               </div>
             </el-tab-pane>
-            <el-tab-pane label="eSIM" name="esim" lazy>
+            <el-tab-pane v-if="!selectedIsAndroid" label="eSIM" name="esim" lazy>
               <DeviceEsimTab
                 :device-id="selectedDevice.id"
                 :device-imei="selectedDevice.modem?.imei || ''"
@@ -1353,7 +1387,7 @@ usePollingScheduler(async () => {
                 @edit-policy="openCardPolicyTab"
               />
             </el-tab-pane>
-            <el-tab-pane label="AT 终端" name="at" lazy>
+            <el-tab-pane v-if="!selectedIsAndroid" label="AT 终端" name="at" lazy>
               <DeviceAtTab
                 :device-id="selectedDevice.id"
                 :backend-mode="selectedDevice.backend_mode"
@@ -1361,10 +1395,10 @@ usePollingScheduler(async () => {
                 :running="selectedDevice.running"
               />
             </el-tab-pane>
-            <el-tab-pane label="USSD 终端" name="ussd" lazy>
+            <el-tab-pane v-if="!selectedIsAndroid" label="USSD 终端" name="ussd" lazy>
               <DeviceUssdTab :device-id="selectedDevice.id" />
             </el-tab-pane>
-            <el-tab-pane label="卡策略" name="card" lazy>
+            <el-tab-pane v-if="!selectedIsAndroid" label="卡策略" name="card" lazy>
               <CardPolicyPanel
                 :device-id="selectedDevice.id"
                 :iccid="selectedDetail?.modem?.iccid"

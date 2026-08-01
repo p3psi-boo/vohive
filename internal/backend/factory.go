@@ -10,9 +10,10 @@ import (
 
 // 后端模式常量
 const (
-	BackendAT   = "at"
-	BackendQMI  = "qmi"
-	BackendMBIM = "mbim"
+	BackendAT      = "at"
+	BackendQMI     = "qmi"
+	BackendMBIM    = "mbim"
+	BackendAndroid = "android"
 )
 
 // NormalizeBackendMode 标准化后端模式字符串
@@ -24,6 +25,8 @@ func NormalizeBackendMode(in string) string {
 		return BackendQMI
 	case BackendMBIM:
 		return BackendMBIM
+	case BackendAndroid:
+		return BackendAndroid
 	default:
 		return BackendAT
 	}
@@ -32,7 +35,7 @@ func NormalizeBackendMode(in string) string {
 // ValidateBackendMode 验证后端模式是否有效
 func ValidateBackendMode(in string) error {
 	switch NormalizeBackendMode(in) {
-	case BackendAT, BackendQMI, BackendMBIM:
+	case BackendAT, BackendQMI, BackendMBIM, BackendAndroid:
 		return nil
 	default:
 		return fmt.Errorf("无效的 device_backend 值: %q (可选: at, qmi, mbim)", in)
@@ -69,6 +72,9 @@ func NewBackend(mode, controlPath string, m *modem.Manager, source QMISource, mb
 		}
 		logger.Info("[backend] 使用 MBIM 后端模式", "control_path", controlPath)
 		return NewMBIMBackend(controlPath, mbimSource), nil
+
+	case BackendAndroid:
+		return nil, fmt.Errorf("Android 后端需要通过 NewAndroidBackend 创建")
 
 	default:
 		return nil, fmt.Errorf("不支持的后端模式: %s", mode)

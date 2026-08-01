@@ -196,6 +196,9 @@ type apduArbiterAwareTransport interface {
 }
 
 func (p *Pool) AddWorkerFromConfig(devCfg config.DeviceConfig) (*Worker, error) {
+	if config.IsAndroidDevice(devCfg) {
+		return p.addAndroidWorkerFromConfig(devCfg)
+	}
 	p.mu.Lock()
 	if _, exists := p.workers[devCfg.ID]; exists {
 		p.mu.Unlock()

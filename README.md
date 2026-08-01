@@ -4,7 +4,7 @@
 [![Go](https://img.shields.io/badge/Go-1.26%2B-00ADD8?logo=go)](go.mod)
 [![Vue 3](https://img.shields.io/badge/Vue-3-42b883?logo=vue.js)](web/package.json)
 
-> 面向高通 4G/LTE/5G 模组（Quectel EC20/EC25/EC21/EG25/EM20 等）的综合管理与代理服务平台。
+> 面向高通 4G/LTE/5G 模组和同一局域网 Android 手机的综合管理与代理服务平台。
 
 VoHive 把模组热插拔管理、SOCKS5/HTTP 代理编排、短信收发、VoWiFi/IMS 通话、eSIM 全生命周期管理整合到一个服务里,并提供一套现代化的响应式 Web 管理后台。
 
@@ -13,6 +13,7 @@ VoHive 把模组热插拔管理、SOCKS5/HTTP 代理编排、短信收发、VoWi
 | 模块 | 说明 |
 | --- | --- |
 | 多模组并发管理 | USB 热插拔自动发现(ttyUSB 等)、多设备实时状态监控 |
+| Android Agent | Android 手机经 WebSocket 接入，提供电话标识、信号、电池、注册状态、多 SIM/eSIM、短信和蜂窝网络出口 |
 | 轻量级代理引擎 | 内建 SOCKS5 / HTTP 代理内核,支持多实例并发;基于 `SO_BINDTODEVICE` 按设备网卡严格绑定出站流量 |
 | 通信与短信中心 | 统一界面/API 处理 AT 短信收发、会话与联系人管理、USSD 交互,短信落库可查 |
 | eSIM 管理 | 通过 AT 指令通道直接管理 eSIM 芯片,支持 Profile 下载、启用/停用、重命名、删除 |
@@ -49,6 +50,20 @@ make build-all ENABLE_UPX=0
 ```
 
 VoWiFi 运行时源码以本地模块形式保存在 `third_party/vowifi-go`,并通过 `go.mod` 的 `replace` 指向本地目录。普通构建不需要访问私有 Go module 或配置 `GOPRIVATE`。
+
+## Android Agent
+
+Android App 独立位于 `android-agent/`：
+
+```bash
+cd android-agent
+./gradlew :app:lintDebug :app:assembleDebug
+```
+
+APK 输出为 `android-agent/app/build/outputs/apk/debug/app-debug.apk`。Agent 没有原生
+Launcher UI；前台服务在 `0.0.0.0:8765` 提供带会话鉴权的局域网页面。使用
+`android-agent/scripts/provision-headless.sh` 完成首次 ADB 授权和管理密码设置，再在网页中
+填写 VoHive 地址、Device ID、Agent ID 与配对 Token。详细步骤见 `android-agent/README.md`。
 
 
 ## 免责声明

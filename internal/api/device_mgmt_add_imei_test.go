@@ -58,3 +58,23 @@ func TestEnsureAddDeviceIMEILeavesExistingIMEIAndATOnly(t *testing.T) {
 		t.Fatalf("AT-only must not be enforced: %v", err)
 	}
 }
+
+func TestDeviceConfigForAddNormalizesAndroidWithoutFakeIMEI(t *testing.T) {
+	got := deviceConfigForAdd(config.DeviceConfig{
+		DeviceKind: "android",
+		Android:    config.AndroidDeviceConfig{AgentID: "agent-123"},
+		ID:         "android-1",
+		ModemIMEI:  "agent-123",
+		ATPort:     "/dev/ttyUSB0",
+		Interface:  "wwan0",
+	})
+	if got.DeviceBackend != "android" || got.DeviceKind != "android" {
+		t.Fatalf("Android mode not normalized: %+v", got)
+	}
+	if got.ModemIMEI != "" || got.ATPort != "" || got.Interface != "" || got.ControlDevice != "" {
+		t.Fatalf("Android device retained modem-only fields: %+v", got)
+	}
+	if got.Android.AgentID != "agent-123" || !got.SMSEnabled {
+		t.Fatalf("Android binding lost: %+v", got)
+	}
+}

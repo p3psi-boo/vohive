@@ -1,6 +1,6 @@
 import { api } from '../stores/auth'
 import { callService } from './http'
-import type { CarrierWebsheetInfo, DeviceConfigDTO, DiscoveredDevice, EsimNotificationItem, EsimOverviewResponse, EsimSpaceDelta } from '../types/api'
+import type { AndroidAgentStatus, AndroidSMSMessage, AndroidSubscription, CarrierWebsheetInfo, DeviceConfigDTO, DiscoveredDevice, EsimNotificationItem, EsimOverviewResponse, EsimSpaceDelta } from '../types/api'
 import type { DeviceDetailVM, DeviceListVM } from '../types/view-model'
 import axios from 'axios'
 
@@ -12,6 +12,13 @@ type UpdateConfigResponse = {
 type AddDeviceResponse = {
   warning?: string
   started?: boolean
+}
+
+export type AndroidPairingTokenResponse = {
+  status: string
+  device_id: string
+  token: string
+  expires_at: string
 }
 
 type DeleteEsimProfileResponse = {
@@ -120,6 +127,69 @@ export const devicesService = {
     return callService(async () => {
       const res = await api.get(`/devices/${id}/config`)
       return (res?.data?.config || null) as DeviceConfigDTO | null
+    })
+  },
+  getAndroidAgentStatus(id: string) {
+    return callService(async () => {
+      const res = await api.get<AndroidAgentStatus>(`/devices/${id}/android-agent/status`)
+      return res.data
+    })
+  },
+  issueAndroidPairingToken(id: string) {
+    return callService(async () => {
+      const res = await api.post<AndroidPairingTokenResponse>(`/devices/${id}/android-agent/pairing-token`)
+      return res.data
+    })
+  },
+  listAndroidSubscriptions(id: string) {
+    return callService(async () => {
+      const res = await api.get<{ subscriptions?: AndroidSubscription[] }>(`/devices/${id}/android-agent/subscriptions`)
+      return res.data?.subscriptions || []
+    })
+  },
+  selectAndroidSubscription(id: string, subscriptionID: number) {
+    return callService(async () => {
+      await api.post(`/devices/${id}/android-agent/subscriptions/select`, { subscription_id: subscriptionID })
+      return true
+    })
+  },
+  switchAndroidESIM(id: string, subscriptionID: number, portIndex: number) {
+    return callService(async () => {
+      const res = await api.post(`/devices/${id}/android-agent/esim/switch`, {
+        subscription_id: subscriptionID,
+        port_index: portIndex
+      })
+      return res.data
+    })
+  },
+  openAndroidESIMSettings(id: string) {
+    return callService(async () => {
+      await api.post(`/devices/${id}/android-agent/esim/settings`)
+      return true
+    })
+  },
+  listAndroidSMS(id: string, limit = 500) {
+    return callService(async () => {
+      const res = await api.get<{ messages?: AndroidSMSMessage[] }>(`/devices/${id}/android-agent/sms`, { params: { limit } })
+      return res.data?.messages || []
+    })
+  },
+  readAndroidSMS(id: string, index: number) {
+    return callService(async () => {
+      const res = await api.get<{ message?: AndroidSMSMessage }>(`/devices/${id}/android-agent/sms/${index}`)
+      return res.data?.message
+    })
+  },
+  deleteAndroidSMS(id: string, index: number) {
+    return callService(async () => {
+      await api.delete(`/devices/${id}/android-agent/sms/${index}`)
+      return true
+    })
+  },
+  deleteAllAndroidSMS(id: string) {
+    return callService(async () => {
+      await api.delete(`/devices/${id}/android-agent/sms`)
+      return true
     })
   },
   listDiscovered() {

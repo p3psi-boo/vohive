@@ -419,6 +419,10 @@ func (w *Worker) ProbeDeviceHealth() (bool, error) {
 }
 
 func (w *Worker) processSMS(sender, content string, timestamp time.Time) {
+	w.processSMSWithIdentity(sender, content, timestamp, "")
+}
+
+func (w *Worker) processSMSWithIdentity(sender, content string, timestamp time.Time, identity string) {
 	logger.Info(fmt.Sprintf("[%s] 处理新短信", w.ID), "sender", sender, "content_len", len(content))
 
 	if smsnotify.ShouldSuppressReceivedSMS(content) {
@@ -426,7 +430,10 @@ func (w *Worker) processSMS(sender, content string, timestamp time.Time) {
 		return
 	}
 
-	imsi := w.GetCachedIMSI()
+	imsi := strings.TrimSpace(identity)
+	if imsi == "" {
+		imsi = w.GetCachedIMSI()
+	}
 	if imsi == "" {
 		if w.Backend != nil {
 			if v, err := w.Backend.GetIMSI(context.Background()); err == nil {

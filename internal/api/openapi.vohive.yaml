@@ -703,6 +703,174 @@ paths:
         '500':
           $ref: '#/components/responses/ErrorMessage'
 
+  /devices/{device_id}/android-agent/pairing-token:
+    post:
+      tags: [devices]
+      summary: 生成 Android Agent 一次性配对 Token
+      parameters:
+        - $ref: '#/components/parameters/DeviceIDPath'
+      responses:
+        '200':
+          description: 五分钟有效的配对凭据
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status: { type: string }
+                  device_id: { type: string }
+                  token: { type: string }
+                  expires_at: { type: string, format: date-time }
+        '400':
+          $ref: '#/components/responses/ErrorMessage'
+        '404':
+          $ref: '#/components/responses/ErrorMessage'
+
+  /devices/{device_id}/android-agent/status:
+    get:
+      tags: [devices]
+      summary: 查询 Android Agent 在线状态与 Telephony 快照
+      parameters:
+        - $ref: '#/components/parameters/DeviceIDPath'
+      responses:
+        '200':
+          description: Agent 状态
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AndroidAgentStatus'
+
+  /devices/{device_id}/android-agent/subscriptions:
+    get:
+      tags: [devices]
+      summary: 查询 Android SIM/eSIM 订阅
+      parameters:
+        - $ref: '#/components/parameters/DeviceIDPath'
+      responses:
+        '200':
+          description: 可访问订阅列表
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status: { type: string }
+                  subscriptions:
+                    type: array
+                    items: { $ref: '#/components/schemas/AndroidSubscription' }
+
+  /devices/{device_id}/android-agent/subscriptions/select:
+    post:
+      tags: [devices]
+      summary: 选择 Android Agent 使用的 SIM/eSIM
+      parameters:
+        - $ref: '#/components/parameters/DeviceIDPath'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [subscription_id]
+              properties:
+                subscription_id: { type: integer }
+      responses:
+        '200':
+          description: 已选择
+
+  /devices/{device_id}/android-agent/esim/switch:
+    post:
+      tags: [devices]
+      summary: 切换 Android eSIM profile
+      parameters:
+        - $ref: '#/components/parameters/DeviceIDPath'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [subscription_id, port_index]
+              properties:
+                subscription_id: { type: integer }
+                port_index: { type: integer }
+      responses:
+        '200':
+          description: eSIM 切换请求已下发
+
+  /devices/{device_id}/android-agent/esim/settings:
+    post:
+      tags: [devices]
+      summary: 在手机打开系统 eSIM 管理界面
+      parameters:
+        - $ref: '#/components/parameters/DeviceIDPath'
+      responses:
+        '200':
+          description: 请求已下发
+
+  /devices/{device_id}/android-agent/sms:
+    get:
+      tags: [sms]
+      summary: 查询 Android 系统短信库
+      parameters:
+        - $ref: '#/components/parameters/DeviceIDPath'
+        - in: query
+          name: limit
+          schema: { type: integer, minimum: 1, maximum: 2000, default: 500 }
+      responses:
+        '200':
+          description: 手机本地短信
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status: { type: string }
+                  messages:
+                    type: array
+                    items: { $ref: '#/components/schemas/AndroidSMSMessage' }
+    delete:
+      tags: [sms]
+      summary: 清空 Android 系统短信库
+      parameters:
+        - $ref: '#/components/parameters/DeviceIDPath'
+      responses:
+        '200':
+          description: 已清空
+
+  /devices/{device_id}/android-agent/sms/{index}:
+    get:
+      tags: [sms]
+      summary: 查询一条 Android 系统短信
+      parameters:
+        - $ref: '#/components/parameters/DeviceIDPath'
+        - in: path
+          name: index
+          required: true
+          schema: { type: integer, format: int64 }
+      responses:
+        '200':
+          description: 手机本地短信
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status: { type: string }
+                  message: { $ref: '#/components/schemas/AndroidSMSMessage' }
+    delete:
+      tags: [sms]
+      summary: 删除一条 Android 系统短信
+      parameters:
+        - $ref: '#/components/parameters/DeviceIDPath'
+        - in: path
+          name: index
+          required: true
+          schema: { type: integer, format: int64 }
+      responses:
+        '200':
+          description: 已删除
+
   /devices/{device_id}:
     put:
       tags: [devices]
@@ -1669,6 +1837,9 @@ components:
           type: string
         message:
           type: string
+        subscription_id:
+          type: integer
+          description: Android Agent 指定发送 SIM/eSIM 的 subscriptionId；省略时使用 Agent 当前选择。
         request_id:
           type: string
         error:
@@ -2453,6 +2624,11 @@ components:
     DeviceConfigDTO:
       type: object
       properties:
+        device_kind:
+          type: string
+          enum: [modem, android]
+        android_agent_id:
+          type: string
         id:
           type: string
         name:
@@ -2477,7 +2653,7 @@ components:
           type: string
         esim_transport:
           type: string
-          enum: [at, qmi]
+          enum: [at, qmi, mbim]
         baud_rate:
           type: integer
         data_bits:
@@ -2496,7 +2672,54 @@ components:
           type: boolean
         device_backend:
           type: string
-          enum: [at, qmi]
+          enum: [at, qmi, mbim, android]
+
+    AndroidSubscription:
+      type: object
+      properties:
+        subscription_id: { type: integer }
+        slot_index: { type: integer }
+        port_index: { type: integer }
+        carrier_name: { type: string }
+        display_name: { type: string }
+        iccid: { type: string }
+        imsi: { type: string }
+        imei: { type: string }
+        msisdn: { type: string }
+        mcc: { type: string }
+        mnc: { type: string }
+        country_iso: { type: string }
+        embedded: { type: boolean }
+        opportunistic: { type: boolean }
+        active: { type: boolean }
+        selected: { type: boolean }
+        default_data: { type: boolean }
+        default_sms: { type: boolean }
+        default_voice: { type: boolean }
+
+    AndroidAgentStatus:
+      type: object
+      properties:
+        status: { type: string }
+        online: { type: boolean }
+        device_id: { type: string }
+        agent_id: { type: string }
+        snapshot:
+          type: object
+          description: IMEI/IMSI/ICCID/MSISDN、信号、电池、固件、注册状态和订阅快照。
+          additionalProperties: true
+
+    AndroidSMSMessage:
+      type: object
+      properties:
+        index: { type: integer, format: int64 }
+        sender: { type: string }
+        recipient: { type: string }
+        content: { type: string }
+        timestamp: { type: string, format: date-time }
+        type: { type: integer }
+        tag: { type: integer }
+        subscription_id: { type: integer }
 
     DeviceMgmtListModem:
       type: object
