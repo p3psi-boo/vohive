@@ -3,165 +3,93 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-  <meta name="color-scheme" content="dark">
-  <meta name="theme-color" content="#111713">
-  <title>VoHive / Android Agent</title>
+  <meta name="color-scheme" content="light">
+  <meta name="theme-color" content="#FAF9F7">
+  <title>Android Agent</title>
   <link rel="stylesheet" href="/styles.css">
 </head>
 <body>
-  <div class="atmosphere" aria-hidden="true"></div>
-
   <section id="login-view" class="login-stage">
-    <div class="login-mark" aria-hidden="true">
-      <span>VH</span>
-      <i></i><i></i><i></i>
-    </div>
-    <main class="login-panel">
-      <p class="eyebrow">HEADLESS CONTROL SURFACE / 01</p>
-      <h1>让设备自己<br><em>说话。</em></h1>
-      <p class="login-copy">VoHive Android Agent 正在局域网内运行。验证身份后管理蜂窝网络、SIM 与短信。</p>
-      <form id="login-form" autocomplete="on">
-        <label>管理账号<input id="login-username" name="username" value="admin" autocomplete="username" required></label>
-        <label>访问密码<input id="login-password" name="password" type="password" autocomplete="current-password" required></label>
-        <button class="primary wide" type="submit"><span>进入控制台</span><b>↗</b></button>
+    <main class="login-card">
+      <div class="mark">VH</div>
+      <h1>Android Agent</h1>
+      <p class="lead">设备设置与恢复</p>
+      <form id="login-form">
+        <label>账号<input id="login-username" value="admin" autocomplete="username" required></label>
+        <label>密码<input id="login-password" type="password" autocomplete="current-password" required></label>
+        <button class="primary" type="submit">登录</button>
         <p id="login-error" class="form-error" role="alert"></p>
       </form>
-      <footer><span>PBKDF2</span><span>HTTPONLY SESSION</span><span>CSRF</span></footer>
     </main>
   </section>
 
   <div id="console-view" class="console hidden">
     <header class="topbar">
-      <a class="brand" href="#overview" aria-label="VoHive 首页">
-        <span class="brand-glyph">VH</span>
-        <span><strong>VoHive</strong><small>ANDROID AGENT / HEADLESS</small></span>
-      </a>
-      <div class="top-status">
-        <span id="service-lamp" class="lamp"></span>
-        <span id="service-label">正在读取设备</span>
-      </div>
-      <div class="top-actions">
-        <button id="refresh-all" class="icon-button" title="刷新">↻</button>
-        <button id="logout" class="text-button">退出</button>
-      </div>
+      <div class="brand"><span class="brand-mark">VH</span><strong>Android Agent</strong></div>
+      <div class="top-state"><i id="top-lamp"></i><span id="top-label">正在读取</span></div>
+      <button id="logout" class="text-button">退出</button>
     </header>
 
-    <nav class="rail" aria-label="控制台栏目">
-      <button class="nav-item active" data-view="overview"><b>01</b><span>总览</span></button>
-      <button class="nav-item" data-view="cellular"><b>02</b><span>蜂窝</span></button>
-      <button class="nav-item" data-view="messages"><b>03</b><span>短信</span></button>
-      <button class="nav-item" data-view="settings"><b>04</b><span>设置</span></button>
-    </nav>
-
     <main class="workspace">
-      <section id="view-overview" class="view active">
-        <div class="page-heading reveal">
-          <div><p class="eyebrow">LIVE DEVICE TELEMETRY</p><h2>设备总览</h2></div>
-          <p id="current-time" class="timestamp">—</p>
-        </div>
+      <section class="hero">
+        <h2 id="connection-title">正在检查连接</h2>
+        <p id="connection-copy">—</p>
+      </section>
 
-        <article class="signal-hero reveal delay-1">
-          <div class="signal-copy">
-            <p>UPSTREAM LINK</p>
-            <h3 id="connection-state">读取中</h3>
-            <span id="connection-detail">等待 Agent 状态</span>
-          </div>
-          <div class="signal-meter" aria-hidden="true">
-            <i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i>
-          </div>
-          <div class="hero-actions">
-            <button id="agent-start" class="primary">启动连接</button>
-            <button id="agent-reconnect" class="secondary">重新连接</button>
-            <button id="agent-stop" class="ghost danger">停止上游</button>
-          </div>
-        </article>
+      <section id="setup-panel" class="panel hidden">
+        <h3>等待 VoHive 发现</h3>
+        <p id="discovered-server" class="discovery">尚未发现服务器</p>
+        <details>
+          <summary>手动配对</summary>
+          <form id="pair-form" class="pair-form">
+            <label>VoHive 地址<input id="pair-server" placeholder="http://192.168.1.2:7575" required></label>
+            <label>配对码<input id="pair-code" inputmode="numeric" pattern="[0-9]{6}" maxlength="6" placeholder="000000" required></label>
+            <button class="primary" type="submit">配对</button>
+          </form>
+        </details>
+      </section>
 
-        <div class="metric-grid reveal delay-2">
-          <article class="metric"><span>蜂窝信号</span><strong id="metric-signal">—</strong><small id="metric-network">等待数据</small></article>
-          <article class="metric"><span>当前运营商</span><strong id="metric-carrier">—</strong><small id="metric-sim">未识别 SIM</small></article>
-          <article class="metric"><span>电池状态</span><strong id="metric-battery">—</strong><small id="metric-power">等待数据</small></article>
-          <article class="metric"><span>服务运行</span><strong id="metric-uptime">—</strong><small id="metric-version">Agent</small></article>
-        </div>
-
-        <div class="split-grid reveal delay-3">
-          <article class="panel device-card">
-            <header><div><p class="section-no">A / IDENTITY</p><h3>设备身份</h3></div><span id="device-online" class="tag">LOCAL</span></header>
-            <dl id="device-facts" class="facts"></dl>
-          </article>
-          <article class="panel access-card">
-            <header><div><p class="section-no">B / ACCESS</p><h3>权限矩阵</h3></div><span id="permission-score" class="score">—</span></header>
-            <div id="permission-list" class="permission-list"></div>
-          </article>
+      <section id="paired-panel" class="panel hidden">
+        <h3>已配对</h3>
+        <a id="open-vohive" class="primary link-button" href="#" target="_blank" rel="noreferrer">打开 VoHive</a>
+        <div class="recovery-actions">
+          <button id="reconnect" class="secondary">重新连接</button>
+          <button id="reset-pairing" class="danger-link">解除配对</button>
         </div>
       </section>
 
-      <section id="view-cellular" class="view">
-        <div class="page-heading"><div><p class="eyebrow">RADIO &amp; SUBSCRIPTIONS</p><h2>蜂窝控制</h2></div><button id="refresh-telephony" class="secondary">刷新射频状态</button></div>
-        <div id="subscription-list" class="subscription-grid"></div>
-        <article class="panel diagnostics-panel">
-          <header><div><p class="section-no">RAW / SNAPSHOT</p><h3>设备诊断</h3></div><button id="refresh-diagnostics" class="ghost">重新采集</button></header>
-          <pre id="diagnostics-output">等待采集…</pre>
-        </article>
-      </section>
-
-      <section id="view-messages" class="view">
-        <div class="page-heading"><div><p class="eyebrow">SMS OPERATIONS</p><h2>短信收发</h2></div><button id="refresh-sms" class="secondary">刷新列表</button></div>
-        <div class="message-layout">
-          <article class="panel composer">
-            <header><div><p class="section-no">NEW / OUTBOUND</p><h3>发送短信</h3></div></header>
-            <form id="sms-form">
-              <label>使用订阅<select id="sms-subscription" name="subscription_id"></select></label>
-              <label>接收号码<input id="sms-to" name="to" inputmode="tel" autocomplete="tel" placeholder="+86…" required></label>
-              <label>短信内容<textarea id="sms-body" name="body" rows="7" maxlength="5000" placeholder="输入短信内容" required></textarea></label>
-              <div class="form-row"><small id="sms-count">0 字</small><button class="primary" type="submit">发送短信 ↗</button></div>
-            </form>
-          </article>
-          <article class="panel inbox">
-            <header><div><p class="section-no">ARCHIVE / LATEST</p><h3>最近消息</h3></div><span id="sms-total" class="tag">0 条</span></header>
-            <div id="sms-list" class="sms-list"><p class="empty-state">正在读取短信…</p></div>
-          </article>
+      <section class="capability-section">
+        <h3>功能</h3>
+        <div class="capability-list">
+          <div class="cap-row"><span>SMS</span><div class="cap-value"><strong id="sms-result">检查中</strong><small id="sms-detail">—</small></div></div>
+          <div class="cap-row"><span>NET</span><div class="cap-value"><strong id="proxy-result">检查中</strong><small id="proxy-detail">—</small></div></div>
+          <div class="cap-row"><span>eSIM</span><div class="cap-value"><strong id="esim-result">检查中</strong><small id="esim-detail">—</small></div></div>
         </div>
       </section>
 
-      <section id="view-settings" class="view">
-        <div class="page-heading"><div><p class="eyebrow">CONFIGURATION &amp; SECURITY</p><h2>无屏设置</h2></div><span class="headless-badge">NO ANDROID UI</span></div>
-        <div class="settings-grid">
-          <article class="panel">
-            <header><div><p class="section-no">01 / UPSTREAM</p><h3>VoHive 连接</h3></div></header>
-            <form id="config-form" class="stack-form">
-              <label>Server URL<input id="config-server" placeholder="http://192.168.1.2:7575"></label>
-              <label>Device ID<input id="config-device" placeholder="android-01"></label>
-              <label>Agent ID<input id="config-agent" required></label>
-              <label>Pair Token<input id="config-token" type="password" autocomplete="off" placeholder="留空则保持现有凭据"></label>
-              <label>HTTP 端口<input id="config-port" type="number" min="1024" max="65535" required></label>
-              <div class="toggle-line"><label><input id="config-autostart" type="checkbox"><span>开机启动前台服务</span></label></div>
-              <div class="toggle-line"><label><input id="config-enabled" type="checkbox"><span>启用 VoHive 上游连接</span></label></div>
-              <button class="primary" type="submit">保存配置</button>
-            </form>
+      <details class="advanced">
+        <summary>高级</summary>
+        <div class="advanced-grid">
+          <article>
+            <h4>运行信息</h4>
+            <dl id="runtime-facts"></dl>
           </article>
-          <article class="panel">
-            <header><div><p class="section-no">02 / CREDENTIALS</p><h3>管理站鉴权</h3></div></header>
-            <form id="password-form" class="stack-form">
-              <label>管理账号<input id="security-username" autocomplete="username" required></label>
+          <article>
+            <h4>本地入口</h4>
+            <div id="management-urls" class="url-list"></div>
+          </article>
+          <article class="credential-card">
+            <h4>修改凭据</h4>
+            <form id="password-form">
+              <label>账号<input id="security-username" autocomplete="username" required></label>
               <label>当前密码<input id="security-current" type="password" autocomplete="current-password" required></label>
               <label>新密码<input id="security-new" type="password" minlength="12" autocomplete="new-password" required></label>
               <label>确认新密码<input id="security-confirm" type="password" minlength="12" autocomplete="new-password" required></label>
-              <p class="field-note">修改后所有会话立即失效，密码至少 12 位。</p>
-              <button class="secondary" type="submit">更新登录凭据</button>
+              <button class="secondary" type="submit">更新</button>
             </form>
           </article>
-          <article class="panel command-panel">
-            <header><div><p class="section-no">03 / ADB BOOTSTRAP</p><h3>无屏授权提示</h3></div></header>
-            <p>Android 运行时权限与默认短信角色由部署脚本通过 ADB 授予；网页只展示状态，不弹出系统界面。</p>
-            <pre>./scripts/provision-headless.sh SERIAL</pre>
-            <p class="field-note">监听地址固定为 <code>0.0.0.0</code>，仅端口可在此修改。</p>
-          </article>
-          <article class="panel network-panel">
-            <header><div><p class="section-no">04 / ENDPOINTS</p><h3>局域网入口</h3></div></header>
-            <div id="management-urls" class="url-list"></div>
-          </article>
         </div>
-      </section>
+      </details>
     </main>
   </div>
 

@@ -17,6 +17,7 @@ final class AgentConfig {
     static final String KEY_AGENT_ID = "agent_id";
     static final String KEY_PAIR_TOKEN = "pair_token";
     static final String KEY_AGENT_TOKEN = "agent_token";
+    static final String KEY_DISCOVERED_SERVER_URL = "discovered_server_url";
     static final String KEY_AUTO_START = "auto_start";
     static final String KEY_AGENT_ENABLED = "agent_enabled";
     static final String KEY_CONNECTION_STATE = "connection_state";

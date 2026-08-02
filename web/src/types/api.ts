@@ -246,6 +246,31 @@ export type AndroidAgentStatus = {
   snapshot: AndroidAgentSnapshot
 }
 
+export type DiscoveredAndroidAgent = {
+  agent_id: string
+  model: string
+  app_version: string
+  address: string
+  management_url: string
+  last_seen: string
+}
+
+export type AndroidEnrollmentCode = {
+  status: string
+  device_id: string
+  code: string
+  server_url: string
+  expires_at: string
+}
+
+export type AndroidEnrollmentResult = {
+  status: string
+  device_id: string
+  name: string
+  expires_at: string
+  proxy_warning?: string
+}
+
 export type AndroidSMSMessage = {
   index: number
   sender?: string

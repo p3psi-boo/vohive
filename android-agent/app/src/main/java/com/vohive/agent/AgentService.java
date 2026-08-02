@@ -11,6 +11,7 @@ import android.content.Intent;
 import android.content.SharedPreferences;
 import android.content.pm.PackageManager;
 import android.net.Network;
+import android.net.Uri;
 import android.os.Build;
 import android.os.Handler;
 import android.os.IBinder;
@@ -86,6 +87,7 @@ public class AgentService extends Service {
     private SmsController sms;
     private ESIMController esim;
     private LocalHttpServer httpServer;
+    private LanDiscovery lanDiscovery;
     private volatile boolean running;
     private volatile boolean upstreamEnabled;
     private volatile boolean connected;
@@ -160,6 +162,18 @@ public class AgentService extends Service {
                 .retryOnConnectionFailure(true)
                 .build();
         ensureHttpServer();
+        lanDiscovery = new LanDiscovery(this, new LanDiscovery.Listener() {
+            @Override public void onServerFound(String serverURL) {
+                AgentConfig.prefs(AgentService.this).edit()
+                        .putString(AgentConfig.KEY_DISCOVERED_SERVER_URL, serverURL).apply();
+            }
+
+            @Override public void onPairingApproved(String serverURL, String deviceID,
+                                                     String pairCode) {
+                mainHandler.post(() -> applyPairing(serverURL, deviceID, pairCode));
+            }
+        });
+        lanDiscovery.start();
         upstreamEnabled = AgentConfig.agentEnabled(this);
         if (upstreamEnabled) {
             setConnectionState("connecting");
@@ -179,6 +193,9 @@ public class AgentService extends Service {
         LocalHttpServer server = httpServer;
         httpServer = null;
         if (server != null) server.close();
+        LanDiscovery discovery = lanDiscovery;
+        lanDiscovery = null;
+        if (discovery != null) discovery.close();
         webServerState = "stopped";
         if (telephony != null) telephony.stop();
         telephony = null;
@@ -283,7 +300,9 @@ public class AgentService extends Service {
         String path = uri.getRawPath();
         if (path == null || "/".equals(path)) path = "";
         while (path.endsWith("/") && !path.isEmpty()) path = path.substring(0, path.length() - 1);
-        return scheme + "://" + uri.getRawAuthority() + path + "/api/android-agent/connect";
+        String agentID = prefs.getString(AgentConfig.KEY_AGENT_ID, "");
+        return scheme + "://" + uri.getRawAuthority() + path + "/api/android-agent/connect?agent_id="
+                + Uri.encode(agentID);
     }
 
     private String websocketAuthorization() {
@@ -354,9 +373,14 @@ public class AgentService extends Service {
             if ("pairing_complete".equals(type)) {
                 String token = message.optString("token");
                 if (!token.isEmpty()) {
-                    AgentConfig.prefs(this).edit()
+                    SharedPreferences.Editor edit = AgentConfig.prefs(this).edit()
                             .putString(AgentConfig.KEY_AGENT_TOKEN, token)
-                            .remove(AgentConfig.KEY_PAIR_TOKEN).apply();
+                            .remove(AgentConfig.KEY_PAIR_TOKEN);
+                    String pairedDeviceID = message.optString("device_id").trim();
+                    if (!pairedDeviceID.isEmpty()) {
+                        edit.putString(AgentConfig.KEY_DEVICE_ID, pairedDeviceID);
+                    }
+                    edit.apply();
                 }
             } else if ("event_ack".equals(type)) {
                 EventStore.acknowledge(this, message.optString("event_id"));
@@ -608,6 +632,8 @@ public class AgentService extends Service {
                 .put("pair_token_configured", !empty(
                         prefs.getString(AgentConfig.KEY_PAIR_TOKEN, "")))
                 .put("paired", !empty(prefs.getString(AgentConfig.KEY_AGENT_TOKEN, "")))
+                .put("discovered_server_url", prefs.getString(
+                        AgentConfig.KEY_DISCOVERED_SERVER_URL, ""))
                 .put("auto_start", prefs.getBoolean(AgentConfig.KEY_AUTO_START, true))
                 .put("agent_enabled", AgentConfig.agentEnabled(this))
                 .put("http_bind", "0.0.0.0")
@@ -677,6 +703,21 @@ public class AgentService extends Service {
         return webConfig().put("web_restart_scheduled", webRestart);
     }
 
+    private synchronized void applyPairing(String serverURL, String deviceID, String pairCode) {
+        AgentConfig.prefs(this).edit()
+                .putString(AgentConfig.KEY_SERVER_URL, serverURL)
+                .putString(AgentConfig.KEY_DEVICE_ID, deviceID)
+                .putString(AgentConfig.KEY_PAIR_TOKEN, pairCode)
+                .remove(AgentConfig.KEY_AGENT_TOKEN)
+                .putBoolean(AgentConfig.KEY_AGENT_ENABLED, true)
+                .apply();
+        reconnectUpstream(false);
+    }
+
+    String appVersionForDiscovery() {
+        return appVersion();
+    }
+
     JSONObject startUpstreamFromWeb() throws Exception {
         mainHandler.post(() -> startUpstream(true));
         return operation("starting");
@@ -690,6 +731,17 @@ public class AgentService extends Service {
     JSONObject reconnectUpstreamFromWeb() throws Exception {
         mainHandler.post(() -> reconnectUpstream(true));
         return operation("reconnecting");
+    }
+
+    synchronized JSONObject resetPairingFromWeb() throws Exception {
+        AgentConfig.prefs(this).edit()
+                .remove(AgentConfig.KEY_AGENT_TOKEN)
+                .remove(AgentConfig.KEY_PAIR_TOKEN)
+                .remove(AgentConfig.KEY_DEVICE_ID)
+                .putBoolean(AgentConfig.KEY_AGENT_ENABLED, false)
+                .apply();
+        stopUpstream(false);
+        return new JSONObject().put("ok", true).put("state", "discoverable");
     }
 
     JSONObject refreshTelephonyFromWeb() throws Exception {

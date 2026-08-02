@@ -109,6 +109,8 @@ func (s *Server) handleProxyInstanceGet(c *gin.Context) {
 
 // handleProxyUpdateConfig 更新代理配置
 func (s *Server) handleProxyUpdateConfig(c *gin.Context) {
+	s.proxyRepoMu.Lock()
+	defer s.proxyRepoMu.Unlock()
 	ctx := c.Request.Context()
 	var req proxyConfigRequest
 	if err := c.ShouldBindJSON(&req); err != nil {

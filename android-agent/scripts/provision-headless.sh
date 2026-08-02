@@ -102,3 +102,4 @@ if [[ -n "$phone_ip" ]]; then
 else
   echo "url=http://DEVICE_LAN_IP:$HTTP_PORT/"
 fi
+echo "next=在 VoHive 打开「设备 → 添加设备 → Android 手机」，批准自动发现的设备"

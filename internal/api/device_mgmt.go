@@ -1484,6 +1484,9 @@ func (s *Server) handleDeviceMgmtDeleteDevice(c *gin.Context) {
 		c.JSON(http.StatusNotFound, gin.H{"status": "error", "message": err.Error()})
 		return
 	}
+	if err := s.removeDeviceProxyInstances(c.Request.Context(), id); err != nil {
+		logger.Warn("删除设备后清理代理实例失败", "device_id", id, "err", err)
+	}
 
 	c.JSON(http.StatusOK, gin.H{"status": "ok"})
 }
@@ -1571,6 +1574,10 @@ func (s *Server) handleDeviceMgmtAddDevice(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"status": "error", "message": "写入配置失败: " + err.Error()})
 		return
 	}
+	personalProxyWarning := ""
+	if config.IsAndroidDevice(newCfg) {
+		personalProxyWarning = s.ensurePersonalProxyDefaults(c.Request.Context(), newCfg)
+	}
 
 	if _, err := s.pool.AddWorkerFromConfig(newCfg); err != nil {
 		logger.Warn("设备配置已添加，但启动运行时设备失败", "device_id", newCfg.ID, "err", err)
@@ -1579,7 +1586,7 @@ func (s *Server) handleDeviceMgmtAddDevice(c *gin.Context) {
 				"status":           "ok",
 				"started":          false,
 				"requires_restart": false,
-				"warning":          "Android 设备配置已添加，请生成配对 Token；Agent 上线后会自动启动",
+				"warning":          joinWarningMessages("Android 设备已添加，等待 Agent 上线", personalProxyWarning),
 			})
 			return
 		}
@@ -1592,7 +1599,7 @@ func (s *Server) handleDeviceMgmtAddDevice(c *gin.Context) {
 		return
 	}
 
-	warningMessage := forcedWarning
+	warningMessage := joinWarningMessages(forcedWarning, personalProxyWarning)
 
 	c.JSON(http.StatusOK, gin.H{
 		"status":           "ok",

@@ -556,6 +556,8 @@ onBeforeRouteLeave(async () => {
             <div class="p-3 bg-gray-50 dark:bg-white/5 rounded-lg">
               <FieldRow label="配置路径" :value="systemInfo.config" monospace copyable />
             </div>
+            <details class="advanced-setting">
+              <summary>高级工具：API、MCP 与运行日志</summary>
             <div class="ui-panel-muted px-4 py-4">
               <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
                 <div class="min-w-0">
@@ -570,6 +572,8 @@ onBeforeRouteLeave(async () => {
                   </div>
 
                 </div>
+                <div class="flex flex-wrap gap-2">
+                <router-link to="/logs"><el-button>查看运行日志</el-button></router-link>
                 <el-button
                   type="primary"
                   class="self-start sm:self-center shrink-0 !border-0"
@@ -579,6 +583,7 @@ onBeforeRouteLeave(async () => {
                   <el-icon><DocumentText24Regular /></el-icon>
                   打开 API 文档
                 </el-button>
+                </div>
               </div>
             </div>
             <div class="ui-panel-muted px-4 py-4">
@@ -668,9 +673,12 @@ onBeforeRouteLeave(async () => {
                 </div>
               </div>
             </div>
+            </details>
          </div>
       </div>
 
+      <details class="optional-settings lg:col-span-2">
+        <summary>通知渠道（可选）</summary>
       <div class="notify-card ui-card p-8 relative overflow-hidden group lg:col-span-2">
          <div class="absolute top-0 right-0 w-40 h-40 bg-purple-500/5 rounded-bl-full -mr-10 -mt-10 transition-transform group-hover:scale-110"></div>
 
@@ -1133,11 +1141,35 @@ onBeforeRouteLeave(async () => {
             </el-tabs>
          </div>
       </div>
+      </details>
     </div>
   </div>
 </template>
 
 <style scoped>
+.advanced-setting,
+.optional-settings {
+  border: 1px solid var(--el-border-color-lighter);
+  border-radius: 14px;
+  background: var(--el-fill-color-extra-light);
+}
+.advanced-setting > summary,
+.optional-settings > summary {
+  padding: 14px 16px;
+  color: var(--el-text-color-secondary);
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+}
+.advanced-setting > .ui-panel-muted {
+  margin: 0 12px 12px;
+}
+.optional-settings > .notify-card {
+  border: 0;
+  border-top: 1px solid var(--el-border-color-lighter);
+  border-radius: 0 0 14px 14px;
+  box-shadow: none;
+}
 :deep(.notify-card .el-input-number) {
   width: 100%;
 }

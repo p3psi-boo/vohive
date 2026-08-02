@@ -61,9 +61,10 @@ cd android-agent
 ```
 
 APK 输出为 `android-agent/app/build/outputs/apk/debug/app-debug.apk`。Agent 没有原生
-Launcher UI；前台服务在 `0.0.0.0:8765` 提供带会话鉴权的局域网页面。使用
-`android-agent/scripts/provision-headless.sh` 完成首次 ADB 授权和管理密码设置，再在网页中
-填写 VoHive 地址、Device ID、Agent ID 与配对 Token。详细步骤见 `android-agent/README.md`。
+Launcher UI；前台服务在 `0.0.0.0:8765` 提供带鉴权的首次接入与故障恢复页面。安装后，
+在 VoHive 选择“设备 → 添加设备 → Android 手机”，批准自动发现的设备即可完成配对；
+设备 ID、Agent ID 和凭据由系统自动管理，同时创建 HTTP 与 SOCKS5 代理。自动发现不可用
+时可使用六位配对码。详细步骤见 `android-agent/README.md`。
 
 
 ## 免责声明

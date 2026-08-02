@@ -12,6 +12,7 @@ import { useProxyStore } from '../stores/proxy'
 import { useUpstreamProxyStore } from '../stores/upstream-proxy'
 import type { ProxyInstance, ProxyDevice, ProxyMode, UpstreamProxy, UpstreamProxyCountry } from '../types/api'
 import { toAppError } from '../services/http'
+import { copyToClipboard } from '../utils/clipboard'
 import {
   upstreamProxyAddressWarning,
   upstreamProxyIPv6AddressHint
@@ -24,13 +25,14 @@ import {
   Edit24Regular,
   Delete24Regular,
   MoreHorizontal24Regular,
+  Copy24Regular,
   Router24Regular,
   Link24Regular,
   Earth24Regular
 } from '@vicons/fluent'
 
 // ── Tab 控制 ──
-const activeTab = ref('upstream') // 默认展示前置代理
+const activeTab = ref('outbound')
 
 // ══════════════════════════════════════════════════════
 // 出站代理（原有逻辑，不动）
@@ -179,6 +181,17 @@ function resetForm() {
     username: '',
     password: ''
   }
+}
+
+function personalProxyAddress(instance: ProxyInstance) {
+  const host = instance.listen_addr === '0.0.0.0' || instance.listen_addr === '::'
+    ? window.location.hostname
+    : instance.listen_addr
+  return String(instance.mode || 'socks5') + '://' + host + ':' + instance.listen_port
+}
+
+async function copyProxyAddress(instance: ProxyInstance) {
+  await copyToClipboard(personalProxyAddress(instance), '代理地址已复制')
 }
 
 async function openDrawer(inst?: ProxyInstance) {
@@ -697,7 +710,7 @@ watch(activeTab, (tab) => {
             </div>
             <div>
               <div class="text-lg font-bold text-gray-900 dark:text-white">本地代理实例</div>
-              <div class="text-xs text-gray-500">每个实例必须绑定一个物理网络接口提供出口通道，通常用于特定分流和IP池场景</div>
+              <div class="text-xs text-gray-500">添加 Android 设备后自动生成；复制地址即可在浏览器或应用中使用</div>
             </div>
           </div>
           <el-button type="primary" @click="openDrawer()" class="!border-0">
@@ -733,6 +746,10 @@ watch(activeTab, (tab) => {
             </div>
 
             <div class="flex items-center gap-2 shrink-0 flex-wrap">
+              <el-button size="small" type="primary" plain @click="copyProxyAddress(inst)">
+                <el-icon><Copy24Regular /></el-icon>
+                复制 {{ personalProxyAddress(inst) }}
+              </el-button>
               <el-tag size="small" type="info">
                 {{ formatModeLabel(inst.mode) }}
               </el-tag>

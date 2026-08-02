@@ -3,6 +3,8 @@ package androidagent
 import (
 	"context"
 	"encoding/base64"
+	"encoding/json"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -234,6 +236,93 @@ func TestAgentTokenRejectsTamperingAndExpiry(t *testing.T) {
 	}
 	if _, err := registry.verifyAgentToken(expired); err == nil {
 		t.Fatal("expired agent token was accepted")
+	}
+}
+
+func TestEnrollmentCodeBindsFirstAgentAndReturnsDeviceIdentity(t *testing.T) {
+	registry := NewRegistry()
+	registry.SetSigningSecret([]byte("test-secret"))
+	var boundDevice, boundAgent string
+	registry.SetPairingHandler(func(deviceID, agentID string) bool {
+		boundDevice, boundAgent = deviceID, agentID
+		return true
+	})
+	registry.SetDeviceAuthorizer(func(deviceID, agentID string) bool {
+		return deviceID == boundDevice && agentID == boundAgent
+	})
+	code, _, err := registry.CreateEnrollmentCode("android-auto", time.Minute)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(code) != 6 || strings.Trim(code, "0123456789") != "" {
+		t.Fatalf("unexpected enrollment code %q", code)
+	}
+	server := httptest.NewServer(http.HandlerFunc(registry.HandleWebSocket))
+	defer server.Close()
+	url := "ws" + strings.TrimPrefix(server.URL, "http") + "?pair_token=" + code + "&agent_id=agent-auto"
+	client, _, err := websocket.DefaultDialer.Dial(url, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer client.Close()
+	var paired Message
+	if err := client.ReadJSON(&paired); err != nil {
+		t.Fatal(err)
+	}
+	if paired.Type != MessagePairingComplete || paired.DeviceID != "android-auto" || paired.AgentID != "agent-auto" || paired.Token == "" {
+		t.Fatalf("unexpected pairing response: %+v", paired)
+	}
+	if boundDevice != "android-auto" || boundAgent != "agent-auto" {
+		t.Fatalf("pairing handler got device=%q agent=%q", boundDevice, boundAgent)
+	}
+}
+
+func TestDiscoveryHubRecordsAgentAndSendsApproval(t *testing.T) {
+	serverConn, err := net.ListenUDP("udp4", &net.UDPAddr{IP: net.IPv4(127, 0, 0, 1)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	hub := NewDiscoveryHub(7575)
+	hub.conn = serverConn
+	go hub.readLoop(serverConn)
+	defer hub.Close()
+
+	client, err := net.ListenUDP("udp4", &net.UDPAddr{IP: net.IPv4(127, 0, 0, 1)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer client.Close()
+	request, _ := json.Marshal(discoveryMessage{
+		Type: discoveryRequestType, Version: ProtocolVersion, AgentID: "agent-lan",
+		Model: "ZTE Test", AppVersion: "1.0", HTTPPort: 8765, Nonce: "nonce-1",
+	})
+	if _, err := client.WriteToUDP(request, serverConn.LocalAddr().(*net.UDPAddr)); err != nil {
+		t.Fatal(err)
+	}
+	_ = client.SetReadDeadline(time.Now().Add(time.Second))
+	buffer := make([]byte, 4096)
+	n, _, err := client.ReadFromUDP(buffer)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var offer discoveryMessage
+	if json.Unmarshal(buffer[:n], &offer) != nil || offer.Type != discoveryOfferType || offer.APIPort != 7575 || offer.Nonce != "nonce-1" {
+		t.Fatalf("unexpected offer: %+v", offer)
+	}
+	agents := hub.List()
+	if len(agents) != 1 || agents[0].AgentID != "agent-lan" || agents[0].ManagementURL != "http://127.0.0.1:8765/" {
+		t.Fatalf("unexpected candidates: %+v", agents)
+	}
+	if err := hub.Approve("agent-lan", "android-lan", "123456"); err != nil {
+		t.Fatal(err)
+	}
+	n, _, err = client.ReadFromUDP(buffer)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var approved discoveryMessage
+	if json.Unmarshal(buffer[:n], &approved) != nil || approved.Type != discoveryApproveType || approved.DeviceID != "android-lan" || approved.PairCode != "123456" {
+		t.Fatalf("unexpected approval: %+v", approved)
 	}
 }
 

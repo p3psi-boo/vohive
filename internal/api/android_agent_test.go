@@ -277,6 +277,87 @@ devices:
 	}
 }
 
+func TestAndroidEnrollmentCodeCreatesDeviceBindsAgentAndCreatesProxyDefaults(t *testing.T) {
+	configPath := filepath.Join(t.TempDir(), "config.yaml")
+	raw := `server:
+  port: ":7575"
+web:
+  username: admin
+  password: secret
+devices: []
+`
+	if err := os.WriteFile(configPath, []byte(raw), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := config.InitGlobalManager(configPath); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := config.Load(configPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Init(filepath.Join(t.TempDir(), "vohive.db")); err != nil {
+		t.Fatal(err)
+	}
+	pool := device.NewPool(cfg)
+	defer pool.Shutdown()
+	server := New(cfg, pool, nil, nil, nil, nil, configPath)
+	authToken, _, err := server.issueSessionToken()
+	if err != nil {
+		t.Fatal(err)
+	}
+	httpServer := httptest.NewServer(server.newRouter())
+	defer httpServer.Close()
+
+	response := androidAPIRequest(t, httpServer.Client(), authToken, http.MethodPost,
+		httpServer.URL+"/api/android-agents/pairing-code", []byte(`{"name":"书房手机"}`))
+	if response.StatusCode != http.StatusOK {
+		t.Fatalf("pairing code: status=%d body=%s", response.StatusCode, readBody(response))
+	}
+	var enrollment androidEnrollmentResponse
+	decodeResponse(t, response, &enrollment)
+	if len(enrollment.Code) != 6 || enrollment.DeviceID == "" || enrollment.ServerURL != httpServer.URL {
+		t.Fatalf("unexpected enrollment: %+v", enrollment)
+	}
+	reserved, err := config.GetDeviceByID(enrollment.DeviceID)
+	if err != nil || reserved != nil {
+		t.Fatalf("unused enrollment must not create a visible device: %+v err=%v", reserved, err)
+	}
+
+	wsURL := "ws" + strings.TrimPrefix(httpServer.URL, "http") + "/api/android-agent/connect?agent_id=agent-personal"
+	headers := http.Header{"Authorization": []string{"VoHivePair " + enrollment.Code}}
+	agent, wsResponse, err := websocket.DefaultDialer.Dial(wsURL, headers)
+	if err != nil {
+		if wsResponse != nil {
+			t.Fatalf("agent connect: %v status=%d", err, wsResponse.StatusCode)
+		}
+		t.Fatal(err)
+	}
+	defer agent.Close()
+	var paired androidagent.Message
+	if err := agent.ReadJSON(&paired); err != nil {
+		t.Fatal(err)
+	}
+	if paired.DeviceID != enrollment.DeviceID || paired.AgentID != "agent-personal" || paired.Token == "" {
+		t.Fatalf("unexpected pairing response: %+v", paired)
+	}
+	bound, err := config.GetDeviceByID(enrollment.DeviceID)
+	if err != nil || bound == nil || bound.Android.AgentID != "agent-personal" || bound.Name != "书房手机" {
+		t.Fatalf("agent binding was not persisted: %+v err=%v", bound, err)
+	}
+	instances, err := server.proxyRepo.List(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(instances) != 2 || instances[0].DeviceID != enrollment.DeviceID || instances[1].DeviceID != enrollment.DeviceID {
+		t.Fatalf("unexpected personal proxy defaults: %+v", instances)
+	}
+	modes := map[string]bool{instances[0].Mode: true, instances[1].Mode: true}
+	if !modes[proxyserver.ModeHTTP] || !modes[proxyserver.ModeSocks5] {
+		t.Fatalf("expected HTTP and SOCKS5 defaults: %+v", instances)
+	}
+}
+
 func serveFakeAndroidAgent(conn *websocket.Conn, errors chan<- error) {
 	respondedStreams := make(map[string]bool)
 	for {

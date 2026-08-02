@@ -15,8 +15,7 @@ import {
   Settings24Regular,
   Board24Regular,
   Phone24Regular,
-  Globe24Regular,
-  DocumentText24Regular
+  Globe24Regular
 } from '@vicons/fluent'
 
 defineProps({
@@ -39,12 +38,11 @@ const debugOpen = ref(false)
 const DebugPanel = defineAsyncComponent(() => import('../components/DebugPanel.vue'))
 
 const menuItems = [
-  { index: '/', label: '仪表盘', icon: Board24Regular },
-  { index: '/devices', label: '设备管理', icon: Phone24Regular },
-  { index: '/proxy', label: '代理管理', icon: Globe24Regular },
-  { index: '/sms', label: '短信中心', icon: Mail24Regular },
-  { index: '/logs', label: '实时日志', icon: DocumentText24Regular },
-  { index: '/settings', label: '系统设置', icon: Settings24Regular }
+  { index: '/', label: '首页', icon: Board24Regular },
+  { index: '/devices', label: '设备', icon: Phone24Regular },
+  { index: '/sms', label: '短信', icon: Mail24Regular },
+  { index: '/proxy', label: '代理', icon: Globe24Regular },
+  { index: '/settings', label: '设置', icon: Settings24Regular }
 ]
 
 async function handleLogout() {

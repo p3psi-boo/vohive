@@ -68,21 +68,25 @@ type loginAttempt struct {
 
 // Server 是 API 服务器的核心结构
 type Server struct {
-	cfg           config.ServerConfig // HTTP 服务器配置
-	fullCfg       *config.Config      // 完整配置引用
-	pool          *device.Pool        // 设备工作器池
-	auth          config.WebConfig    // Web 认证配置
-	fs            http.FileSystem     // 静态文件系统
-	configPath    string              // 配置文件路径
-	proxyMgr      *server.Manager     // 代理实例管理器
-	trafficRT     realtimeTrafficSubscriber
-	proxyRepo     repo.ProxyInstanceRepository
-	proxySyncMu   sync.Mutex
-	mcpKeyMu      sync.RWMutex
-	voiceGW       *voicehost.Gateway
-	notifyMgr     *notify.Manager
-	websheets     *vwebsheet.Broker
-	androidAgents *androidagent.Registry
+	cfg                       config.ServerConfig // HTTP 服务器配置
+	fullCfg                   *config.Config      // 完整配置引用
+	pool                      *device.Pool        // 设备工作器池
+	auth                      config.WebConfig    // Web 认证配置
+	fs                        http.FileSystem     // 静态文件系统
+	configPath                string              // 配置文件路径
+	proxyMgr                  *server.Manager     // 代理实例管理器
+	trafficRT                 realtimeTrafficSubscriber
+	proxyRepo                 repo.ProxyInstanceRepository
+	proxyRepoMu               sync.Mutex
+	proxySyncMu               sync.Mutex
+	mcpKeyMu                  sync.RWMutex
+	voiceGW                   *voicehost.Gateway
+	notifyMgr                 *notify.Manager
+	websheets                 *vwebsheet.Broker
+	androidAgents             *androidagent.Registry
+	androidDiscovery          *androidagent.DiscoveryHub
+	androidEnrollmentMu       sync.Mutex
+	pendingAndroidEnrollments map[string]pendingAndroidEnrollment
 
 	httpSrvMu sync.Mutex
 	httpSrv   *http.Server
@@ -107,19 +111,20 @@ func New(cfg *config.Config, pool *device.Pool, fs http.FileSystem, proxyMgr *se
 		configPath = "config/config.yaml"
 	}
 	s := &Server{
-		cfg:           cfg.Server,
-		fullCfg:       cfg,
-		auth:          cfg.Web,
-		pool:          pool,
-		fs:            fs,
-		configPath:    configPath,
-		proxyMgr:      proxyMgr,
-		voiceGW:       voiceGW,
-		notifyMgr:     notifyMgr,
-		proxyRepo:     repo.NewDBRepo(),
-		websheets:     vwebsheet.New(vwebsheet.Config{BasePath: "/api/websheets"}),
-		loginAttempts: make(map[string]loginAttempt),
-		shutdownCh:    make(chan struct{}),
+		cfg:                       cfg.Server,
+		fullCfg:                   cfg,
+		auth:                      cfg.Web,
+		pool:                      pool,
+		fs:                        fs,
+		configPath:                configPath,
+		proxyMgr:                  proxyMgr,
+		voiceGW:                   voiceGW,
+		notifyMgr:                 notifyMgr,
+		proxyRepo:                 repo.NewDBRepo(),
+		websheets:                 vwebsheet.New(vwebsheet.Config{BasePath: "/api/websheets"}),
+		loginAttempts:             make(map[string]loginAttempt),
+		shutdownCh:                make(chan struct{}),
+		pendingAndroidEnrollments: make(map[string]pendingAndroidEnrollment),
 	}
 	if pool != nil {
 		s.androidAgents = pool.AndroidAgentRegistry()
@@ -131,6 +136,8 @@ func New(cfg *config.Config, pool *device.Pool, fs http.FileSystem, proxyMgr *se
 			return err == nil && dev != nil && config.IsAndroidDevice(*dev) &&
 				strings.TrimSpace(dev.Android.AgentID) == strings.TrimSpace(agentID)
 		})
+		s.androidAgents.SetPairingHandler(s.bindAndroidEnrollment)
+		s.androidDiscovery = androidagent.NewDiscoveryHub(serverPortNumber(cfg.Server.Port))
 	}
 
 	return s
@@ -290,9 +297,12 @@ func (s *Server) newRouter() *gin.Engine {
 		api.GET("/system/update/check", s.handleCheckUpdate)   // 检查系统更新
 		api.POST("/system/update/apply", s.handleApplyUpdate)  // 应用系统更新
 
-		api.GET("/devices", s.handleDeviceMgmtList)                                            // 获取设备列表（管理页用）
-		api.POST("/devices", s.handleDeviceMgmtAddDevice)                                      // 添加新设备
-		api.GET("/devices/discovered", s.handleDeviceMgmtDiscovered)                           // 获取已发现的硬件设备
+		api.GET("/devices", s.handleDeviceMgmtList)                            // 获取设备列表（管理页用）
+		api.POST("/devices", s.handleDeviceMgmtAddDevice)                      // 添加新设备
+		api.GET("/devices/discovered", s.handleDeviceMgmtDiscovered)           // 获取已发现的硬件设备
+		api.GET("/android-agents/discovered", s.handleDiscoveredAndroidAgents) // 获取局域网内未配对 Agent
+		api.POST("/android-agents/discovered/:agent_id/approve", s.handleApproveDiscoveredAndroidAgent)
+		api.POST("/android-agents/pairing-code", s.handleCreateAndroidEnrollmentCode)          // 创建六位兜底配对码
 		api.POST("/devices/actions/rescan", s.handleDeviceRescan)                              // 手动触发设备重扫描
 		api.GET("/devices/:device_id/overview/stream", s.handleDeviceMgmtOverviewStreamSingle) // SSE 单体深层实时流
 		api.GET("/devices/:device_id/overview", s.handleDeviceMgmtOverviewLite)                // 获取设备详情（轻量版）
@@ -373,6 +383,13 @@ func (s *Server) newRouter() *gin.Engine {
 
 func (s *Server) Run() error {
 	r := s.newRouter()
+	if s.androidDiscovery != nil {
+		if err := s.androidDiscovery.Start(); err != nil {
+			logger.Warn("Android Agent 局域网发现未启动", "err", err)
+		} else {
+			logger.Info("Android Agent 局域网发现已启动", "udp_port", androidagent.DiscoveryPort)
+		}
+	}
 
 	srv := &http.Server{
 		Addr:              s.cfg.Port,
@@ -397,6 +414,9 @@ func (s *Server) Shutdown(ctx context.Context) error {
 	default:
 		close(s.shutdownCh)
 	}
+	if s.androidDiscovery != nil {
+		_ = s.androidDiscovery.Close()
+	}
 
 	s.httpSrvMu.Lock()
 	srv := s.httpSrv
@@ -405,6 +425,19 @@ func (s *Server) Shutdown(ctx context.Context) error {
 		return nil
 	}
 	return srv.Shutdown(ctx)
+}
+
+func serverPortNumber(address string) int {
+	address = strings.TrimSpace(address)
+	if port, err := strconv.Atoi(strings.TrimPrefix(address, ":")); err == nil && port > 0 && port <= 65535 {
+		return port
+	}
+	if index := strings.LastIndex(address, ":"); index >= 0 {
+		if port, err := strconv.Atoi(address[index+1:]); err == nil && port > 0 && port <= 65535 {
+			return port
+		}
+	}
+	return 7575
 }
 
 func (s *Server) requestIDMiddleware() gin.HandlerFunc {

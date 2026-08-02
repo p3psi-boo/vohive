@@ -1,6 +1,6 @@
 import { api } from '../stores/auth'
 import { callService } from './http'
-import type { AndroidAgentStatus, AndroidSMSMessage, AndroidSubscription, CarrierWebsheetInfo, DeviceConfigDTO, DiscoveredDevice, EsimNotificationItem, EsimOverviewResponse, EsimSpaceDelta } from '../types/api'
+import type { AndroidAgentStatus, AndroidEnrollmentCode, AndroidEnrollmentResult, AndroidSMSMessage, AndroidSubscription, CarrierWebsheetInfo, DeviceConfigDTO, DiscoveredAndroidAgent, DiscoveredDevice, EsimNotificationItem, EsimOverviewResponse, EsimSpaceDelta } from '../types/api'
 import type { DeviceDetailVM, DeviceListVM } from '../types/view-model'
 import axios from 'axios'
 
@@ -132,6 +132,27 @@ export const devicesService = {
   getAndroidAgentStatus(id: string) {
     return callService(async () => {
       const res = await api.get<AndroidAgentStatus>(`/devices/${id}/android-agent/status`)
+      return res.data
+    })
+  },
+  listDiscoveredAndroidAgents() {
+    return callService(async () => {
+      const res = await api.get<{ agents?: DiscoveredAndroidAgent[] }>('/android-agents/discovered')
+      return res.data?.agents || []
+    })
+  },
+  approveDiscoveredAndroidAgent(agentID: string, name = '') {
+    return callService(async () => {
+      const res = await api.post<AndroidEnrollmentResult>(
+        `/android-agents/discovered/${encodeURIComponent(agentID)}/approve`,
+        { name }
+      )
+      return res.data
+    })
+  },
+  createAndroidEnrollmentCode(name = '') {
+    return callService(async () => {
+      const res = await api.post<AndroidEnrollmentCode>('/android-agents/pairing-code', { name })
       return res.data
     })
   },

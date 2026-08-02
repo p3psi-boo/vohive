@@ -1,8 +1,14 @@
 <script setup lang="ts">
-import { computed, watch } from 'vue'
-import type { DeviceConfigDTO, DiscoveredDevice } from '../types/api'
+import { computed, ref, watch } from 'vue'
+import type { AndroidEnrollmentCode, DeviceConfigDTO, DiscoveredAndroidAgent, DiscoveredDevice } from '../types/api'
 import { isWwanQmiControlPath } from '../utils/deviceBackend'
-import { ArrowSync24Regular, PhoneAdd24Regular, Save24Regular } from '@vicons/fluent'
+import {
+  ArrowSync24Regular,
+  CheckmarkCircle24Regular,
+  Key24Regular,
+  PhoneAdd24Regular,
+  Save24Regular
+} from '@vicons/fluent'
 
 const props = defineProps<{
   modelValue: boolean
@@ -11,27 +17,32 @@ const props = defineProps<{
   addSelected: DiscoveredDevice | null
   addConfig: DeviceConfigDTO
   addSaving: boolean
+  androidAgents: DiscoveredAndroidAgent[]
+  androidDiscovering: boolean
+  androidPairingLoading: boolean
+  androidPairingCode: AndroidEnrollmentCode | null
 }>()
 
 const emit = defineEmits<{
   'update:modelValue': [value: boolean]
   'select-device': [device: DiscoveredDevice]
+  'refresh-android': []
+  'approve-android': [agent: DiscoveredAndroidAgent, name: string]
+  'create-pairing-code': [name: string]
   save: []
 }>()
 
 const isAndroid = computed(() => props.addConfig.device_kind === 'android' || props.addConfig.device_backend === 'android')
 const isQMIBackendOnly = computed(() => !isAndroid.value && isWwanQmiControlPath(props.addSelected?.control_path || props.addConfig?.control_device))
 const isMBIMBackendOnly = computed(() => !isAndroid.value && String(props.addSelected?.mode || '').toLowerCase() === 'mbim')
+const androidName = ref('')
+const showFallback = ref(false)
 
 function setKind(kind: 'modem' | 'android') {
   props.addConfig.device_kind = kind
   if (kind === 'android') {
     props.addConfig.device_backend = 'android'
-    props.addConfig.interface = ''
-    props.addConfig.at_port = ''
-    props.addConfig.control_device = ''
-    props.addConfig.usb_path = ''
-    props.addConfig.modem_imei = props.addConfig.android_agent_id || ''
+    emit('refresh-android')
   } else {
     props.addConfig.device_backend = 'at'
     props.addConfig.android_agent_id = ''
@@ -41,7 +52,7 @@ function setKind(kind: 'modem' | 'android') {
 
 function discoveryIdentity(d: DiscoveredDevice | null | undefined): string {
   if (!d) return ''
-  return String(d.discovery_key || `${d.usb_path || ''}|${d.at_port || ''}`)
+  return String(d.discovery_key || (String(d.usb_path || '') + '|' + String(d.at_port || '')))
 }
 
 function discoveryModeText(d: DiscoveredDevice | null | undefined): string {
@@ -54,6 +65,10 @@ function discoveryModeText(d: DiscoveredDevice | null | undefined): string {
   return 'UNKNOWN'
 }
 
+function shortAddress(agent: DiscoveredAndroidAgent) {
+  return agent.address + ' · Agent ' + agent.agent_id.slice(-6)
+}
+
 watch(isQMIBackendOnly, (locked) => {
   if (locked) props.addConfig.device_backend = 'qmi'
 }, { immediate: true })
@@ -62,8 +77,10 @@ watch(isMBIMBackendOnly, (locked) => {
   if (locked) props.addConfig.device_backend = 'mbim'
 }, { immediate: true })
 
-watch(() => props.addConfig.android_agent_id, (value) => {
-  if (isAndroid.value) props.addConfig.modem_imei = String(value || '').trim()
+watch(() => props.modelValue, (open) => {
+  if (!open) return
+  androidName.value = ''
+  showFallback.value = false
 })
 </script>
 
@@ -75,25 +92,15 @@ watch(() => props.addConfig.android_agent_id, (value) => {
     width="min(760px, 94vw)"
     class="glass-modal"
   >
-    <div class="grid grid-cols-2 gap-2 p-1 rounded-xl bg-gray-100 dark:bg-gray-800 mb-5">
-      <button
-        type="button"
-        class="py-2.5 rounded-lg text-sm font-bold transition"
-        :class="!isAndroid ? 'bg-white text-indigo-600 shadow-sm dark:bg-gray-700' : 'text-gray-500'"
-        @click="setKind('modem')"
-      >USB 模组</button>
-      <button
-        type="button"
-        class="py-2.5 rounded-lg text-sm font-bold transition flex items-center justify-center gap-2"
-        :class="isAndroid ? 'bg-white text-indigo-600 shadow-sm dark:bg-gray-700' : 'text-gray-500'"
-        @click="setKind('android')"
-      >
-        <el-icon><PhoneAdd24Regular /></el-icon>Android Agent
+    <div class="kind-switch">
+      <button type="button" :class="{ active: !isAndroid }" @click="setKind('modem')">USB 模组</button>
+      <button type="button" :class="{ active: isAndroid }" @click="setKind('android')">
+        <el-icon><PhoneAdd24Regular /></el-icon>Android 手机
       </button>
     </div>
 
     <template v-if="!isAndroid">
-      <div class="text-sm text-gray-500 mb-3">选择一个未配置的 USB 设备，系统自动填充端口和识别信息。</div>
+      <div class="text-sm text-gray-500 mb-3">选择一个未配置的 USB 设备，识别信息会自动填充。</div>
       <div class="max-h-[250px] overflow-auto space-y-2 pr-1">
         <div v-if="discovering" class="py-10 flex flex-col items-center text-gray-400">
           <el-icon class="is-loading mb-3" size="32"><ArrowSync24Regular /></el-icon>
@@ -122,39 +129,16 @@ watch(() => props.addConfig.android_agent_id, (value) => {
           <div v-if="unconfiguredDiscovered.length === 0" class="text-sm text-gray-500 p-3">暂无可添加模组</div>
         </template>
       </div>
-    </template>
 
-    <div v-else class="p-4 rounded-xl border border-indigo-100 bg-indigo-50/60 dark:bg-indigo-500/10 mb-4">
-      <div class="font-bold text-indigo-900 dark:text-indigo-200">同局域网 Android 接入</div>
-      <div class="text-xs text-indigo-700 dark:text-indigo-300 mt-1">
-        保存后在设备配置中生成配对 Token，再填入 Android App。Agent ID 必须与 App 中一致。
-      </div>
-    </div>
-
-    <div class="grid grid-cols-1 sm:grid-cols-2 gap-4 mt-4">
-      <div class="space-y-1">
-        <label class="text-xs font-bold text-gray-500 uppercase tracking-wider">ID</label>
-        <el-input v-model="addConfig.id" :placeholder="isAndroid ? '例如 android_01' : '例如 ec20_3'" />
-      </div>
-      <div class="space-y-1">
-        <label class="text-xs font-bold text-gray-500 uppercase tracking-wider">名称</label>
-        <el-input v-model="addConfig.name" placeholder="显示名称（可选）" />
-      </div>
-
-      <template v-if="isAndroid">
-        <div class="space-y-1 sm:col-span-2">
-          <label class="text-xs font-bold text-gray-500 uppercase tracking-wider">Agent ID</label>
-          <el-input v-model="addConfig.android_agent_id" placeholder="Android App 显示的 UUID" />
-        </div>
-      </template>
-
-      <template v-else>
-        <div class="space-y-1"><label class="text-xs font-bold text-gray-500">IMEI 绑定</label><el-input v-model="addConfig.modem_imei" disabled /></div>
-        <div class="space-y-1"><label class="text-xs font-bold text-gray-500">USB 路径</label><el-input v-model="addConfig.usb_path" disabled /></div>
-        <div class="space-y-1"><label class="text-xs font-bold text-gray-500">网卡接口</label><el-input v-model="addConfig.interface" disabled /></div>
-        <div class="space-y-1"><label class="text-xs font-bold text-gray-500">AT 端口</label><el-input v-model="addConfig.at_port" disabled /></div>
-        <div class="space-y-1"><label class="text-xs font-bold text-gray-500">控制设备</label><el-input v-model="addConfig.control_device" disabled /></div>
-        <div class="p-3 rounded-xl border border-gray-200 bg-gray-50">
+      <div class="grid grid-cols-1 sm:grid-cols-2 gap-4 mt-4">
+        <div class="space-y-1"><label class="field-label">ID</label><el-input v-model="addConfig.id" placeholder="例如 ec20_3" /></div>
+        <div class="space-y-1"><label class="field-label">名称</label><el-input v-model="addConfig.name" placeholder="显示名称（可选）" /></div>
+        <div class="space-y-1"><label class="field-label">IMEI 绑定</label><el-input v-model="addConfig.modem_imei" disabled /></div>
+        <div class="space-y-1"><label class="field-label">USB 路径</label><el-input v-model="addConfig.usb_path" disabled /></div>
+        <div class="space-y-1"><label class="field-label">网卡接口</label><el-input v-model="addConfig.interface" disabled /></div>
+        <div class="space-y-1"><label class="field-label">AT 端口</label><el-input v-model="addConfig.at_port" disabled /></div>
+        <div class="space-y-1"><label class="field-label">控制设备</label><el-input v-model="addConfig.control_device" disabled /></div>
+        <div class="p-3 rounded-xl border border-gray-200 bg-gray-50 dark:bg-gray-800 dark:border-gray-700">
           <div class="text-sm font-bold mb-2">设备后端模式</div>
           <el-select v-model="addConfig.device_backend" class="w-full" :disabled="isQMIBackendOnly || isMBIMBackendOnly">
             <el-option v-if="!isMBIMBackendOnly" label="AT" value="at" :disabled="isQMIBackendOnly" />
@@ -162,16 +146,112 @@ watch(() => props.addConfig.android_agent_id, (value) => {
             <el-option v-if="isMBIMBackendOnly" label="MBIM" value="mbim" />
           </el-select>
         </div>
-      </template>
-    </div>
+      </div>
+    </template>
+
+    <template v-else>
+      <div class="pairing-hero">
+        <div class="pairing-orbit"><span></span><i></i><i></i></div>
+        <div>
+          <p class="pairing-kicker">LAN DISCOVERY</p>
+          <h3>打开 Agent，设备会出现在这里</h3>
+          <p>无需填写地址、UUID 或 Token。确认一次后，VoHive 会自动完成配对并创建 HTTP 与 SOCKS5 代理。</p>
+        </div>
+        <el-button circle :loading="androidDiscovering" @click="emit('refresh-android')">
+          <el-icon><ArrowSync24Regular /></el-icon>
+        </el-button>
+      </div>
+
+      <div class="space-y-3 mt-4">
+        <article v-for="agent in androidAgents" :key="agent.agent_id" class="agent-candidate">
+          <div class="agent-glyph"><PhoneAdd24Regular /></div>
+          <div class="min-w-0 flex-1">
+            <strong>{{ agent.model || 'Android 设备' }}</strong>
+            <span>{{ shortAddress(agent) }} · v{{ agent.app_version || '--' }}</span>
+          </div>
+          <el-button type="primary" :loading="androidPairingLoading" @click="emit('approve-android', agent, androidName)">
+            <el-icon><CheckmarkCircle24Regular /></el-icon>允许接入
+          </el-button>
+        </article>
+        <div v-if="androidDiscovering && !androidAgents.length" class="discovery-empty">
+          <el-icon class="is-loading"><ArrowSync24Regular /></el-icon>
+          <span>正在监听局域网设备…</span>
+        </div>
+        <div v-else-if="!androidAgents.length" class="discovery-empty">
+          <span class="pulse-dot"></span>
+          <span>尚未发现 Agent，保持此窗口打开即可自动刷新。</span>
+        </div>
+      </div>
+
+      <div class="name-line">
+        <label>设备名称（可选）</label>
+        <el-input v-model="androidName" placeholder="例如：书房备用机" />
+      </div>
+
+      <button class="fallback-toggle" type="button" @click="showFallback = !showFallback">
+        <el-icon><Key24Regular /></el-icon>
+        {{ showFallback ? '收起手动方式' : '没有发现设备？使用六位配对码' }}
+      </button>
+      <div v-if="showFallback" class="fallback-panel">
+        <template v-if="androidPairingCode">
+          <p>在 Agent 本地网页输入服务器地址和下面的配对码：</p>
+          <code class="server-url">{{ androidPairingCode.server_url }}</code>
+          <strong class="pair-code">{{ androidPairingCode.code }}</strong>
+          <small>配对码五分钟内有效，Agent ID 和设备 ID 会自动绑定。</small>
+        </template>
+        <template v-else>
+          <p>自动发现不可用时，生成一个临时配对码，在 Agent 本地网页中输入即可。</p>
+          <el-button type="primary" plain :loading="androidPairingLoading" @click="emit('create-pairing-code', androidName)">生成六位配对码</el-button>
+        </template>
+      </div>
+    </template>
 
     <template #footer>
       <div class="flex justify-end gap-2">
-        <el-button @click="emit('update:modelValue', false)">取消</el-button>
-        <el-button type="primary" :loading="addSaving" @click="emit('save')" class="!border-0">
+        <el-button @click="emit('update:modelValue', false)">{{ isAndroid ? '完成' : '取消' }}</el-button>
+        <el-button v-if="!isAndroid" type="primary" :loading="addSaving" @click="emit('save')" class="!border-0">
           <el-icon><Save24Regular /></el-icon>保存
         </el-button>
       </div>
     </template>
   </el-dialog>
 </template>
+
+<style scoped>
+.kind-switch { display: grid; grid-template-columns: 1fr 1fr; gap: 4px; padding: 4px; margin-bottom: 20px; border-radius: 14px; background: rgba(100,116,139,.1); }
+.kind-switch button { display: flex; align-items: center; justify-content: center; gap: 8px; padding: 11px; border-radius: 10px; color: #64748b; font-size: 13px; font-weight: 750; transition: .2s ease; }
+.kind-switch button.active { color: #0f766e; background: white; box-shadow: 0 4px 14px rgba(15,23,42,.08); }
+.field-label { color: #64748b; font-size: 11px; font-weight: 800; letter-spacing: .08em; text-transform: uppercase; }
+.pairing-hero { display: grid; grid-template-columns: auto 1fr auto; gap: 18px; align-items: center; padding: 22px; border: 1px solid rgba(13,148,136,.2); border-radius: 18px; background: linear-gradient(135deg, rgba(20,184,166,.12), rgba(240,253,250,.55)); }
+.pairing-hero h3 { margin: 2px 0 5px; color: #134e4a; font-size: 18px; font-weight: 800; }
+.pairing-hero p { margin: 0; color: #47716d; font-size: 12px; line-height: 1.6; }
+.pairing-kicker { color: #0f766e !important; font-size: 9px !important; font-weight: 900; letter-spacing: .18em; }
+.pairing-orbit { position: relative; display: grid; place-items: center; width: 48px; height: 48px; border: 1px solid rgba(13,148,136,.3); border-radius: 50%; }
+.pairing-orbit span { width: 13px; height: 13px; border-radius: 50%; background: #0d9488; box-shadow: 0 0 20px #2dd4bf; }
+.pairing-orbit i { position: absolute; inset: 6px; border: 1px solid rgba(13,148,136,.28); border-radius: 50%; animation: orbit 2.5s ease-in-out infinite; }
+.pairing-orbit i:last-child { inset: -2px; animation-delay: .5s; }
+.agent-candidate { display: flex; align-items: center; gap: 13px; padding: 14px; border: 1px solid rgba(148,163,184,.25); border-radius: 15px; background: rgba(255,255,255,.72); }
+.agent-candidate strong, .agent-candidate span { display: block; }
+.agent-candidate strong { color: #172554; font-size: 14px; }
+.agent-candidate span { overflow: hidden; margin-top: 3px; color: #64748b; font-family: 'Fira Code', monospace; font-size: 10px; text-overflow: ellipsis; white-space: nowrap; }
+.agent-glyph { display: grid; place-items: center; width: 36px; height: 36px; border-radius: 10px; color: #0f766e; background: #ccfbf1; }
+.discovery-empty { display: flex; align-items: center; justify-content: center; gap: 10px; min-height: 70px; border: 1px dashed rgba(100,116,139,.3); border-radius: 14px; color: #64748b; font-size: 12px; }
+.pulse-dot { width: 8px; height: 8px; border-radius: 50%; background: #14b8a6; box-shadow: 0 0 0 5px rgba(20,184,166,.12); animation: pulse 1.8s infinite; }
+.name-line { display: grid; grid-template-columns: 140px 1fr; gap: 12px; align-items: center; margin-top: 16px; }
+.name-line label { color: #64748b; font-size: 12px; font-weight: 700; }
+.fallback-toggle { display: flex; align-items: center; gap: 7px; margin-top: 20px; color: #64748b; font-size: 12px; }
+.fallback-toggle:hover { color: #0f766e; }
+.fallback-panel { display: grid; gap: 10px; margin-top: 10px; padding: 16px; border-radius: 14px; background: rgba(15,23,42,.04); color: #475569; font-size: 12px; }
+.server-url { padding: 8px 10px; border-radius: 8px; background: rgba(15,23,42,.08); color: #334155; }
+.pair-code { color: #0f766e; font-family: 'Fira Code', monospace; font-size: 34px; letter-spacing: .18em; }
+.fallback-panel small { color: #94a3b8; }
+@keyframes pulse { 50% { opacity: .45; transform: scale(.75); } }
+@keyframes orbit { 50% { transform: scale(1.15); opacity: .35; } }
+:global(.dark) .kind-switch button.active { color: #5eead4; background: #1e293b; }
+:global(.dark) .pairing-hero { background: linear-gradient(135deg, rgba(13,148,136,.18), rgba(15,23,42,.65)); }
+:global(.dark) .pairing-hero h3, :global(.dark) .agent-candidate strong { color: #ccfbf1; }
+:global(.dark) .pairing-hero p { color: #94a3b8; }
+:global(.dark) .agent-candidate { background: rgba(15,23,42,.58); }
+:global(.dark) .server-url { color: #cbd5e1; background: rgba(255,255,255,.06); }
+@media (max-width: 640px) { .pairing-hero { grid-template-columns: auto 1fr; } .pairing-hero > :last-child { display: none; } .name-line { grid-template-columns: 1fr; } .agent-candidate { align-items: flex-start; flex-wrap: wrap; } .agent-candidate .el-button { width: 100%; } }
+</style>

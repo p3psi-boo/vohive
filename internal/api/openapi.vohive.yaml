@@ -726,6 +726,57 @@ paths:
         '404':
           $ref: '#/components/responses/ErrorMessage'
 
+  /android-agents/discovered:
+    get:
+      tags: [devices]
+      summary: 查询局域网内正在广播的 Android Agent
+      responses:
+        '200':
+          description: 最近 30 秒内发现的 Agent
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status: { type: string }
+                  agents:
+                    type: array
+                    items: { $ref: '#/components/schemas/DiscoveredAndroidAgent' }
+
+  /android-agents/discovered/{agent_id}/approve:
+    post:
+      tags: [devices]
+      summary: 批准局域网 Android Agent 接入
+      parameters:
+        - in: path
+          name: agent_id
+          required: true
+          schema: { type: string }
+      requestBody:
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/AndroidEnrollmentRequest' }
+      responses:
+        '200':
+          description: 已创建设备并将一次性凭据下发给 Agent
+        '404':
+          $ref: '#/components/responses/ErrorMessage'
+
+  /android-agents/pairing-code:
+    post:
+      tags: [devices]
+      summary: 创建自动绑定 Agent 身份的六位配对码
+      requestBody:
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/AndroidEnrollmentRequest' }
+      responses:
+        '200':
+          description: 五分钟有效的配对码
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AndroidEnrollmentCode' }
+
   /devices/{device_id}/android-agent/status:
     get:
       tags: [devices]
@@ -2708,6 +2759,30 @@ components:
           type: object
           description: IMEI/IMSI/ICCID/MSISDN、信号、电池、固件、注册状态和订阅快照。
           additionalProperties: true
+
+    DiscoveredAndroidAgent:
+      type: object
+      properties:
+        agent_id: { type: string }
+        model: { type: string }
+        app_version: { type: string }
+        address: { type: string }
+        management_url: { type: string, format: uri }
+        last_seen: { type: string, format: date-time }
+
+    AndroidEnrollmentRequest:
+      type: object
+      properties:
+        name: { type: string }
+
+    AndroidEnrollmentCode:
+      type: object
+      properties:
+        status: { type: string }
+        device_id: { type: string }
+        code: { type: string, pattern: '^[0-9]{6}$' }
+        server_url: { type: string, format: uri }
+        expires_at: { type: string, format: date-time }
 
     AndroidSMSMessage:
       type: object

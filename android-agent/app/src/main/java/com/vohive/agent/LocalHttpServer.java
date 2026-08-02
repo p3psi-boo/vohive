@@ -191,6 +191,9 @@ final class LocalHttpServer implements Closeable {
         if ("POST".equals(request.method) && "/api/agent/reconnect".equals(request.path)) {
             return json(200, service.reconnectUpstreamFromWeb());
         }
+        if ("POST".equals(request.method) && "/api/pairing/reset".equals(request.path)) {
+            return json(200, service.resetPairingFromWeb());
+        }
         if ("POST".equals(request.method) && "/api/telephony/refresh".equals(request.path)) {
             return json(200, service.refreshTelephonyFromWeb());
         }

@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math/big"
 	"net/http"
 	"strings"
 	"sync"
@@ -22,6 +23,7 @@ type SMSHandler func(deviceID string, event SMSReceivedEvent)
 type SMSStatusHandler func(deviceID string, event SMSStatusEvent)
 type SessionHandler func(deviceID string)
 type DeviceAuthorizer func(deviceID, agentID string) bool
+type PairingHandler func(deviceID, agentID string) bool
 
 type Registry struct {
 	mu            sync.RWMutex
@@ -32,6 +34,7 @@ type Registry struct {
 	onSMSStatus   SMSStatusHandler
 	onSession     SessionHandler
 	authorizer    DeviceAuthorizer
+	onPairing     PairingHandler
 	signingSecret []byte
 	credentialTTL time.Duration
 	upgrader      websocket.Upgrader
@@ -117,6 +120,15 @@ func (r *Registry) SetDeviceAuthorizer(authorizer DeviceAuthorizer) {
 	r.mu.Unlock()
 }
 
+func (r *Registry) SetPairingHandler(handler PairingHandler) {
+	if r == nil {
+		return
+	}
+	r.mu.Lock()
+	r.onPairing = handler
+	r.mu.Unlock()
+}
+
 func (r *Registry) SetSMSHandler(handler SMSHandler) {
 	if r == nil {
 		return
@@ -175,6 +187,42 @@ func (r *Registry) CreatePairCode(deviceID, agentID string, ttl time.Duration) (
 	return token, expires, nil
 }
 
+// CreateEnrollmentCode creates a human-friendly code that binds to the first
+// agent presenting it. The authenticated API reserves deviceID before issuing
+// this code; SetPairingHandler persists the resulting agent binding.
+func (r *Registry) CreateEnrollmentCode(deviceID string, ttl time.Duration) (string, time.Time, error) {
+	if r == nil {
+		return "", time.Time{}, errors.New("android agent registry not available")
+	}
+	deviceID = strings.TrimSpace(deviceID)
+	if deviceID == "" {
+		return "", time.Time{}, errors.New("device_id is required")
+	}
+	if ttl <= 0 {
+		ttl = 5 * time.Minute
+	}
+	code, err := randomNumericCode(6)
+	if err != nil {
+		return "", time.Time{}, err
+	}
+	expires := time.Now().Add(ttl)
+	r.mu.Lock()
+	for {
+		if _, exists := r.pairCodes[code]; !exists {
+			break
+		}
+		code, err = randomNumericCode(6)
+		if err != nil {
+			r.mu.Unlock()
+			return "", time.Time{}, err
+		}
+	}
+	r.pairCodes[code] = pairCode{DeviceID: deviceID, Expires: expires}
+	r.prunePairCodesLocked(time.Now())
+	r.mu.Unlock()
+	return code, expires, nil
+}
+
 func (r *Registry) HandleWebSocket(w http.ResponseWriter, req *http.Request) {
 	if r == nil {
 		http.Error(w, "android agent registry not available", http.StatusServiceUnavailable)
@@ -193,7 +241,9 @@ func (r *Registry) HandleWebSocket(w http.ResponseWriter, req *http.Request) {
 	r.addSession(session)
 	if paired {
 		token, tokenErr := r.issueAgentToken(deviceID, agentID)
-		if tokenErr != nil || session.send(Message{Type: MessagePairingComplete, Token: token}) != nil {
+		if tokenErr != nil || session.send(Message{
+			Type: MessagePairingComplete, Token: token, DeviceID: deviceID, AgentID: agentID,
+		}) != nil {
 			_ = session.Close()
 			return
 		}
@@ -227,13 +277,21 @@ func (r *Registry) consumePairCode(req *http.Request) (deviceID, agentID string,
 	}
 	now := time.Now()
 	r.mu.Lock()
-	defer r.mu.Unlock()
 	entry, exists := r.pairCodes[token]
 	delete(r.pairCodes, token)
+	pairingHandler := r.onPairing
+	r.mu.Unlock()
 	if !exists || now.After(entry.Expires) {
 		return "", "", false
 	}
-	return entry.DeviceID, entry.AgentID, true
+	agentID = strings.TrimSpace(entry.AgentID)
+	if agentID == "" {
+		agentID = strings.TrimSpace(req.URL.Query().Get("agent_id"))
+		if agentID == "" || pairingHandler == nil || !pairingHandler(entry.DeviceID, agentID) {
+			return "", "", false
+		}
+	}
+	return entry.DeviceID, agentID, true
 
 }
 
@@ -392,4 +450,24 @@ func randomToken(n int) (string, error) {
 		return "", fmt.Errorf("generate token: %w", err)
 	}
 	return base64.RawURLEncoding.EncodeToString(buf), nil
+}
+
+func randomNumericCode(digits int) (string, error) {
+	if digits < 1 || digits > 18 {
+		return "", errors.New("invalid numeric code length")
+	}
+	limit := new(big.Int).Exp(big.NewInt(10), big.NewInt(int64(digits)), nil)
+	value, err := rand.Int(rand.Reader, limit)
+	if err != nil {
+		return "", fmt.Errorf("generate numeric code: %w", err)
+	}
+	return fmt.Sprintf("%0*d", digits, value.Int64()), nil
+}
+
+func (r *Registry) prunePairCodesLocked(now time.Time) {
+	for code, entry := range r.pairCodes {
+		if now.After(entry.Expires) {
+			delete(r.pairCodes, code)
+		}
+	}
 }

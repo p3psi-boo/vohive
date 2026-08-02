@@ -26,7 +26,7 @@ import { copyToClipboard } from '../utils/clipboard'
 import { isWwanQmiControlPath } from '../utils/deviceBackend'
 import { isControlOnline, isRecoveryPhase } from '../utils/deviceLifecycle'
 import { getMccMncIndex, isoToFlagEmoji, type MccMncRow } from '../utils/mcc-mnc'
-import type { CardPolicy, CarrierWebsheetInfo, DeviceConfigDTO, DeviceMgmtListItem, DeviceOverviewItem, DiscoveredDevice, ModemStatus, PNNRecord, RealtimeTrafficSnapshot } from '../types/api'
+import type { AndroidEnrollmentCode, CardPolicy, CarrierWebsheetInfo, DeviceConfigDTO, DeviceMgmtListItem, DeviceOverviewItem, DiscoveredAndroidAgent, DiscoveredDevice, ModemStatus, PNNRecord, RealtimeTrafficSnapshot } from '../types/api'
 import type { AppError } from '../types/domain'
 import { toAppError } from '../services/http'
 import { devicesService } from '../services/devices'
@@ -113,6 +113,11 @@ const addConfig = ref<DeviceConfigDTO>({
 })
 
 const discovering = ref(false)
+const androidAgents = ref<DiscoveredAndroidAgent[]>([])
+const androidDiscovering = ref(false)
+const androidPairingLoading = ref(false)
+const androidPairingCode = ref<AndroidEnrollmentCode | null>(null)
+let androidDiscoveryTimer: number | null = null
 
 type RollingTrafficSample = {
   at: number
@@ -950,7 +955,7 @@ function openSms() {
   router.push(`/sms?device=${selectedId.value}`)
 }
 
-async function saveConfig() {
+async function saveConfig(silent = false) {
   const id = String(selectedId.value || '').trim()
   if (!id || !editConfig.value) return
   saving.value = true
@@ -961,7 +966,7 @@ async function saveConfig() {
       ElMessage.warning(result.data.warning)
     } else if (result.data.requiresRestart) {
       ElMessage.warning('配置已保存，但部分变更需要重启服务后生效')
-    } else {
+    } else if (!silent) {
       ElMessage.success('配置已保存')
     }
     editDirty.value = false
@@ -1033,8 +1038,71 @@ function openAddDialog() {
     control_device: '',
     device_backend: 'at'
   }
+  androidAgents.value = []
+  androidPairingCode.value = null
   refreshDiscoveredForAdd()
 }
+
+async function refreshAndroidDiscovery(silent = false) {
+  if (androidDiscovering.value) return
+  androidDiscovering.value = !silent
+  try {
+    const result = await devicesService.listDiscoveredAndroidAgents()
+    if (result.ok) androidAgents.value = result.data
+  } catch {
+    // Discovery is best-effort and the dialog keeps polling while open.
+  } finally {
+    androidDiscovering.value = false
+  }
+}
+
+async function approveAndroidAgent(agent: DiscoveredAndroidAgent, name: string) {
+  if (androidPairingLoading.value) return
+  androidPairingLoading.value = true
+  try {
+    const result = await devicesService.approveDiscoveredAndroidAgent(agent.agent_id, name)
+    if (!result.ok) throw new Error(result.error.message)
+    const deviceID = result.data.device_id
+    ElMessage.success('设备已接入，默认代理正在启动')
+    addDialogOpen.value = false
+    await fetchAll()
+    if (deviceID) await selectDevice(deviceID)
+  } catch (error: unknown) {
+    ElMessage.error(toAppError(error).message || 'Android Agent 接入失败')
+    await refreshAndroidDiscovery()
+  } finally {
+    androidPairingLoading.value = false
+  }
+}
+
+async function createAndroidPairingCode(name: string) {
+  if (androidPairingLoading.value) return
+  androidPairingLoading.value = true
+  try {
+    const result = await devicesService.createAndroidEnrollmentCode(name)
+    if (!result.ok) throw new Error(result.error.message)
+    androidPairingCode.value = result.data
+  } catch (error: unknown) {
+    ElMessage.error(toAppError(error).message || '配对码生成失败')
+  } finally {
+    androidPairingLoading.value = false
+  }
+}
+
+watch(
+  () => [addDialogOpen.value, addConfig.value.device_kind],
+  ([open, kind]) => {
+    if (androidDiscoveryTimer !== null) {
+      window.clearInterval(androidDiscoveryTimer)
+      androidDiscoveryTimer = null
+    }
+    if (!open || kind !== 'android') return
+    void refreshAndroidDiscovery()
+    androidDiscoveryTimer = window.setInterval(() => {
+      void refreshAndroidDiscovery(true)
+    }, 3000)
+  }
+)
 
 async function refreshDiscoveredForAdd() {
   discovering.value = true
@@ -1197,6 +1265,7 @@ onBeforeUnmount(() => {
   if (detailAbort) detailAbort.abort()
   if (trafficAbort) trafficAbort.abort()
   clearLiveRadioFallbackTimer()
+  if (androidDiscoveryTimer !== null) window.clearInterval(androidDiscoveryTimer)
 })
 
 // 由于 SSE 只订阅当前选中的单设备详情，恢复列表的低频拉取（无 IPC 开销）以同步左右设备增减和状态跳变。
@@ -1414,6 +1483,7 @@ usePollingScheduler(async () => {
                 :saving="saving"
                 :deleting="deleting"
                 @save="saveConfig"
+                @autosave="saveConfig(true)"
                 @delete="deleteDevice"
               />
             </el-tab-pane>
@@ -1437,7 +1507,14 @@ usePollingScheduler(async () => {
     :add-selected="addSelected"
     :add-config="addConfig"
     :add-saving="addSaving"
+    :android-agents="androidAgents"
+    :android-discovering="androidDiscovering"
+    :android-pairing-loading="androidPairingLoading"
+    :android-pairing-code="androidPairingCode"
     @select-device="selectDiscoveredForAdd"
+    @refresh-android="refreshAndroidDiscovery"
+    @approve-android="approveAndroidAgent"
+    @create-pairing-code="createAndroidPairingCode"
     @save="addDevice"
   />
   <CarrierWebsheetDialog
