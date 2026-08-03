@@ -25,6 +25,8 @@
 /android-agent/.gradle/
 /android-agent/**/build/
 /android-agent/local.properties
+/android-agent/webui/node_modules/
+/android-agent/webui/dev-dist/
 
 # IDE 和编辑器
 .idea/

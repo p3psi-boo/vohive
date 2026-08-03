@@ -5,6 +5,7 @@ import android.annotation.SuppressLint;
 import android.app.Notification;
 import android.app.NotificationChannel;
 import android.app.NotificationManager;
+import android.app.PendingIntent;
 import android.app.Service;
 import android.content.Context;
 import android.content.Intent;
@@ -565,7 +566,16 @@ public class AgentService extends Service {
                 .setContentText("Web 0.0.0.0:" + AgentConfig.httpPort(this) + " · " + text)
                 .setSmallIcon(android.R.drawable.stat_sys_upload)
                 .setCategory(Notification.CATEGORY_SERVICE)
+                .setContentIntent(webPendingIntent())
                 .setOngoing(true).build();
+    }
+
+    // 点击通知用默认浏览器打开本机管理网页（127.0.0.1 指向设备自身）。
+    private PendingIntent webPendingIntent() {
+        Intent open = new Intent(Intent.ACTION_VIEW,
+                Uri.parse("http://127.0.0.1:" + AgentConfig.httpPort(this) + "/"));
+        return PendingIntent.getActivity(this, 0, open,
+                PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
     }
 
     private void updateNotification() {

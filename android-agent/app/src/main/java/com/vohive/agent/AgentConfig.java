@@ -5,8 +5,6 @@ import android.content.Context;
 import android.content.SharedPreferences;
 import android.util.Log;
 
-import java.security.SecureRandom;
-import java.util.Base64;
 import java.util.UUID;
 
 @SuppressLint("ApplySharedPref") // Initialization must complete before service startup reads preferences.
@@ -30,9 +28,9 @@ final class AgentConfig {
 
     static final int DEFAULT_HTTP_PORT = 8765;
     static final String DEFAULT_WEB_USERNAME = "admin";
+    static final String DEFAULT_WEB_PASSWORD = "admin";
 
     private static final String TAG = "VoHiveAgent";
-    private static final SecureRandom RANDOM = new SecureRandom();
 
     private AgentConfig() {}
 
@@ -64,13 +62,9 @@ final class AgentConfig {
 
         prefs = prefs(context);
         if (empty(prefs.getString(KEY_WEB_PASSWORD_HASH, ""))) {
-            byte[] bytes = new byte[15];
-            RANDOM.nextBytes(bytes);
-            String bootstrapPassword = "vh-" + Base64.getUrlEncoder().withoutPadding().encodeToString(bytes);
-            WebAuth.setPassword(context, bootstrapPassword);
-            Log.i(TAG, "Generated headless web credentials: username="
-                    + prefs(context).getString(KEY_WEB_USERNAME, DEFAULT_WEB_USERNAME)
-                    + " password=" + bootstrapPassword);
+            // 出厂默认密码 admin，用户可在本地网页的设置页修改。
+            WebAuth.setPassword(context, DEFAULT_WEB_PASSWORD);
+            Log.i(TAG, "Initialized default web credentials (password: admin)");
         }
     }
 

@@ -71,20 +71,27 @@ ADB 首次配置通过受 android.permission.DUMP 保护的 Receiver 完成，�
 NoDisplay 的 Bootstrap Activity，由它拉起非导出的前台服务；普通 Android 应用不能调用
 配置或启动入口，设备上也不会出现原生界面。
 
-未经过脚本直接启动时，Agent 会生成随机管理密码并写入 ADB 日志：
-
-~~~bash
-adb -s SERIAL logcat -d -s VoHiveAgent:I
-~~~
+未经过脚本直接启动时，本地网页使用默认凭据（账号 admin、密码 admin），
+登录页只需输入密码；请在设置页尽快修改密码。
 
 ## 本地网页
 
-打开 http://DEVICE_LAN_IP:8765/。页面仅提供：
+打开 http://DEVICE_LAN_IP:8765/，或点击前台服务通知直接用默认浏览器打开
+（指向设备自身的 127.0.0.1）。网页是 Vite + Vue 构建的 SPA（hash 路由），带
+manifest 与 Service Worker 的 PWA 配置：经 localhost 或 HTTPS 反代访问时可安装到主屏
+并离线缓存应用外壳；局域网 HTTP 不是安全上下文，浏览器会跳过 SW 注册，页面功能不受
+影响。页面仅提供：
 
 - 自动发现状态和六位码兜底配对；
 - 上游连接状态、重新连接与解除配对；
 - 短信、蜂窝代理和 eSIM 三项结果状态；
-- 本地管理凭据修改和折叠的高级标识信息。
+- 本地管理凭据修改和设置页的运行信息。
+
+源码在 webui/，构建产物提交在 app/src/main/assets/web/。修改网页后重新构建：
+
+~~~bash
+./scripts/build-webui.sh
+~~~
 
 除静态登录页和 POST /api/auth/login 外，所有 /api/* 均要求有效会话；POST、PUT、
 DELETE 还要求 X-CSRF-Token。管理接口不启用 CORS，并返回 CSP、禁止嵌入和禁止 MIME

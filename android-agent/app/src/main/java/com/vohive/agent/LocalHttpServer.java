@@ -71,10 +71,52 @@ final class LocalHttpServer implements Closeable {
                     thread.setDaemon(true);
                     return thread;
                 }, new ThreadPoolExecutor.AbortPolicy());
-        assets.put("/", loadAsset("web/index.html", "text/html; charset=utf-8"));
-        assets.put("/index.html", assets.get("/"));
-        assets.put("/app.js", loadAsset("web/app.js", "application/javascript; charset=utf-8"));
-        assets.put("/styles.css", loadAsset("web/styles.css", "text/css; charset=utf-8"));
+        loadAssets("web");
+        assets.put("/", assets.get("/index.html"));
+    }
+
+    // 递归加载 assets/web 下全部构建产物，按扩展名白名单映射 MIME。
+    // 请求路径只与预加载表精确匹配，天然杜绝路径穿越。
+    private void loadAssets(String assetDir) throws IOException {
+        String[] children = service.getAssets().list(assetDir);
+        if (children == null) return;
+        for (String child : children) {
+            String assetPath = assetDir + "/" + child;
+            String requestPath = "/" + assetPath.substring("web/".length());
+            if (child.indexOf('.') < 0) {
+                // Vite 产物中无扩展名的条目均为目录（assets/、icons/）
+                loadAssets(assetPath);
+                continue;
+            }
+            String contentType = contentTypeOf(child);
+            if (contentType == null) continue;
+            assets.put(requestPath, loadAsset(assetPath, contentType));
+        }
+    }
+
+    private static String contentTypeOf(String name) {
+        String lower = name.toLowerCase(Locale.ROOT);
+        if (lower.endsWith(".html")) return "text/html; charset=utf-8";
+        if (lower.endsWith(".js")) return "application/javascript; charset=utf-8";
+        if (lower.endsWith(".css")) return "text/css; charset=utf-8";
+        if (lower.endsWith(".json") || lower.endsWith(".webmanifest")) return "application/json; charset=utf-8";
+        if (lower.endsWith(".svg")) return "image/svg+xml";
+        if (lower.endsWith(".png")) return "image/png";
+        if (lower.endsWith(".ico")) return "image/x-icon";
+        if (lower.endsWith(".woff2")) return "font/woff2";
+        return null;
+    }
+
+    private static String cachePolicyOf(String requestPath) {
+        // HTML、manifest 与 Service Worker 必须每次校验，否则更新无法生效
+        if ("/".equals(requestPath) || "/index.html".equals(requestPath)
+                || "/sw.js".equals(requestPath) || "/registerSW.js".equals(requestPath)
+                || "/manifest.webmanifest".equals(requestPath)) {
+            return "no-store";
+        }
+        // Vite 产物带内容 hash，可永久缓存
+        if (requestPath.startsWith("/assets/")) return "public, max-age=31536000, immutable";
+        return "public, max-age=300";
     }
 
     synchronized void start() throws IOException {
@@ -142,8 +184,7 @@ final class LocalHttpServer implements Closeable {
         if ("GET".equals(request.method)) {
             Asset asset = assets.get(request.path);
             if (asset != null) return Response.bytes(200, asset.contentType, asset.data)
-                    .header("Cache-Control", "/".equals(request.path)
-                            || "/index.html".equals(request.path) ? "no-store" : "public, max-age=300");
+                    .header("Cache-Control", cachePolicyOf(request.path));
         }
 
         if ("POST".equals(request.method) && "/api/auth/login".equals(request.path)) {

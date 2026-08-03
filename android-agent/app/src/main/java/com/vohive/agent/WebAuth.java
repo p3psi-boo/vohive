@@ -21,9 +21,11 @@ final class WebAuth {
 
     private WebAuth() {}
 
+    // 长度策略由调用方负责：网页改密码接口强制 12 位以上，
+    // ADB 配置通道（DUMP 保护）和出厂默认值不受此限。
     static void setPassword(Context context, String password) {
-        if (password == null || password.length() < 12) {
-            throw new IllegalArgumentException("password must contain at least 12 characters");
+        if (password == null || password.isEmpty()) {
+            throw new IllegalArgumentException("password must not be empty");
         }
         byte[] salt = new byte[SALT_BYTES];
         RANDOM.nextBytes(salt);
