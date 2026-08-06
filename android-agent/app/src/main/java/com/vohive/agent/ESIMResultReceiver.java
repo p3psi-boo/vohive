@@ -75,8 +75,8 @@ public class ESIMResultReceiver extends BroadcastReceiver {
                 PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
         Notification notification = new Notification.Builder(context, CHANNEL_ID)
                 .setSmallIcon(android.R.drawable.stat_sys_warning)
-                .setContentTitle("需要确认 eSIM 切换")
-                .setContentText("点按后在系统界面确认 VoHive 的 eSIM 切换请求")
+                .setContentTitle("eSIM 切换待确认")
+                .setContentText("点按以在系统界面完成授权")
                 .setContentIntent(pending)
                 .setAutoCancel(true)
                 .build();

@@ -3,7 +3,6 @@
     <main class="login-card">
       <div class="mark">VH</div>
       <h1>VoHive Agent</h1>
-      <p class="lead">输入密码以管理设备连接</p>
       <form class="stack" @submit.prevent="submit">
         <label class="field">
           密码

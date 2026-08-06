@@ -40,7 +40,7 @@ import {
 const router = useRouter()
 const route = useRoute()
 const devicesStore = useDevicesStore()
-const { list: storeList, detail: storeDetail, discovered: storeDiscovered, config: storeConfig, deviceLimit } = storeToRefs(devicesStore)
+const { list: storeList, detail: storeDetail, discovered: storeDiscovered, config: storeConfig } = storeToRefs(devicesStore)
 
 let listAbort: AbortController | null = null
 let detailAbort: AbortController | null = null
@@ -1395,8 +1395,6 @@ usePollingScheduler(async () => {
         :sort-dir="sortDir"
         :selected-id="selectedId"
         :filtered-devices="filteredDevices"
-        :device-count="devices.length"
-        :device-limit="deviceLimit"
         @update:query="query = $event"
         @update:status-filter="statusFilter = $event"
         @update:sort-key="sortKey = $event"

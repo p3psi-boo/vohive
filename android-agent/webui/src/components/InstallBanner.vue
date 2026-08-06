@@ -23,8 +23,8 @@ import {
 const visible = computed(() => !isStandalone() && !installState.dismissed)
 
 const copy = computed(() => {
-  if (installState.deferred) return '添加到主屏幕，随时一键打开'
-  if (isIos()) return '用 Safari 分享菜单「添加到主屏幕」，随时一键打开'
-  return '在浏览器菜单选择「添加到主屏幕」，随时一键打开'
+  if (installState.deferred) return '添加到主屏幕，便于快速访问'
+  if (isIos()) return '通过 Safari 分享菜单「添加到主屏幕」'
+  return '在浏览器菜单中选择「添加到主屏幕」'
 })
 </script>

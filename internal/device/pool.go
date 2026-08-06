@@ -1336,12 +1336,6 @@ func (p *Pool) StartAll() error {
 	devices := append([]config.DeviceConfig(nil), p.cfg.Devices...)
 	for i := range devices {
 		devCfg := devices[i]
-		if !FreeDeviceLimitAllowsConfiguredDevice(devices, devCfg.ID) {
-			logger.Warn("当前版本设备数量限制，跳过启动配置设备",
-				"device", devCfg.ID,
-				"limit", DefaultFreeDeviceLimit)
-			continue
-		}
 		go p.startConfiguredDeviceBootstrap(devCfg, "start_all")
 	}
 	return nil
@@ -1537,12 +1531,6 @@ func (p *Pool) rescanAndReconnect(opts rescanReconnectOptions) error {
 
 	for _, pair := range resolved.Matched {
 		md := pair.Config
-		if !FreeDeviceLimitAllowsConfiguredDevice(managed, md.ID) {
-			logger.Warn("当前版本设备数量限制，跳过启动配置设备",
-				"device", md.ID,
-				"limit", DefaultFreeDeviceLimit)
-			continue
-		}
 
 		hw := pair.Hardware
 		useQMI := requiresQMICore(md)
@@ -1714,9 +1702,6 @@ func (p *Pool) rescanAndReconnect(opts rescanReconnectOptions) error {
 	}
 
 	for _, md := range resolved.Offline {
-		if !FreeDeviceLimitAllowsConfiguredDevice(managed, md.ID) {
-			continue
-		}
 		worker := p.GetWorker(md.ID)
 		if worker != nil {
 			logger.Info("检测到设备离线，清理 Worker 以便后续重建",
@@ -1753,9 +1738,6 @@ func (p *Pool) RebuildWorker(deviceID string) error {
 	cfg, err := config.GetDeviceByID(deviceID)
 	if err != nil || cfg == nil {
 		return fmt.Errorf("读取设备 %s 配置失败: %w", deviceID, err)
-	}
-	if !FreeDeviceLimitAllowsConfiguredDevice(config.ListDevices(), cfg.ID) {
-		return fmt.Errorf("%s", FreeDeviceWorkerLimitMessage())
 	}
 
 	// 先停止 VoWiFi（如有），并让任何正在启动中的旧实例失效。

@@ -12,7 +12,7 @@
 
   <main class="workspace">
     <section class="section" style="margin-top: 0">
-      <h3>运行信息</h3>
+      <h3>运行状态</h3>
       <div class="card">
         <dl class="facts">
           <div v-for="fact in facts" :key="fact[0]"><dt>{{ fact[0] }}</dt><dd>{{ fact[1] }}</dd></div>
@@ -21,7 +21,7 @@
     </section>
 
     <section v-if="urls.length" class="section">
-      <h3>本机访问地址</h3>
+      <h3>Web 管理地址</h3>
       <div class="url-list"><code v-for="url in urls" :key="url">{{ url }}</code></div>
     </section>
 
@@ -36,7 +36,7 @@
     </section>
 
     <section class="section danger-zone">
-      <h3>危险操作</h3>
+      <h3>危险区</h3>
       <button class="danger-button" @click="resetPairing">解除配对</button>
       <button class="secondary" @click="logout">退出登录</button>
     </section>
@@ -63,10 +63,10 @@ const urls = computed(() => status.value.web?.urls || [])
 const facts = computed<[string, string][]>(() => {
   const s = status.value.service || {}
   return [
-    ['设备', s.model || '—'],
+    ['设备型号', s.model || '—'],
     ['Android', s.android_version || '—'],
-    ['Agent', s.app_version || '—'],
-    ['运行时间', formatDuration(s.uptime_ms || 0)],
+    ['Agent 版本', s.app_version || '—'],
+    ['运行时长', formatDuration(s.uptime_ms || 0)],
     ['设备 ID', config.value.device_id || '未分配'],
     ['Agent ID', config.value.agent_id || '—']
   ]

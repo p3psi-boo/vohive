@@ -144,9 +144,6 @@ func (s *Server) bindAndroidEnrollment(deviceID, agentID string) bool {
 		if !ok || time.Now().After(pending.Expires) {
 			return false
 		}
-		if err := validateFreeDeviceConfigLimit(config.ListDevices()); err != nil {
-			return false
-		}
 		name := strings.TrimSpace(pending.Name)
 		if name == "" {
 			name = "Android 手机"
@@ -197,13 +194,6 @@ func (s *Server) reservePendingAndroidEnrollment(name string, ttl time.Duration)
 			delete(s.pendingAndroidEnrollments, id)
 		}
 	}
-	devices := config.ListDevices()
-	for range s.pendingAndroidEnrollments {
-		devices = append(devices, config.DeviceConfig{})
-	}
-	if err := validateFreeDeviceConfigLimit(devices); err != nil {
-		return "", err
-	}
 	id := nextAndroidDeviceID("")
 	base := id
 	for index := 2; ; index++ {
@@ -241,9 +231,6 @@ func (s *Server) reserveAndroidDevice(agentID, name string) (*config.DeviceConfi
 				return &copy, false, nil
 			}
 		}
-	}
-	if err := validateFreeDeviceConfigLimit(config.ListDevices()); err != nil {
-		return nil, false, err
 	}
 	id := nextAndroidDeviceID(agentID)
 	if strings.TrimSpace(name) == "" {

@@ -794,7 +794,7 @@ func (s *Server) handleDeviceMgmtList(c *gin.Context) {
 		items = append(items, item)
 	}
 
-	c.JSON(http.StatusOK, gin.H{"devices": items, "device_limit": device.DefaultFreeDeviceLimit})
+	c.JSON(http.StatusOK, gin.H{"devices": items})
 }
 
 // handleDeviceMgmtRefreshInfo 主动触发设备底层重新采集各种信息（SIM、信号等）
@@ -1511,13 +1511,6 @@ func validateDeviceBackendConfig(cfg config.DeviceConfig) error {
 	return nil
 }
 
-func validateFreeDeviceConfigLimit(devices []config.DeviceConfig) error {
-	if device.FreeDeviceLimitReached(len(devices)) {
-		return fmt.Errorf("%s", device.FreeDeviceAddLimitMessage())
-	}
-	return nil
-}
-
 func (s *Server) handleDeviceMgmtAddDevice(c *gin.Context) {
 	var req addDeviceRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -1545,10 +1538,6 @@ func (s *Server) handleDeviceMgmtAddDevice(c *gin.Context) {
 			"status":  "error",
 			"message": fmt.Sprintf("设备资源冲突：%s=%s 已被设备 %s 使用", conflict.Field, conflict.Value, conflict.OtherID),
 		})
-		return
-	}
-	if err := validateFreeDeviceConfigLimit(config.ListDevices()); err != nil {
-		c.JSON(http.StatusConflict, gin.H{"status": "error", "message": err.Error()})
 		return
 	}
 	// MBIM 设备使用 MBIM DeviceCaps 探测 IMEI，非 MBIM 设备使用 QMI 探测

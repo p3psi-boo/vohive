@@ -13,7 +13,7 @@
   <main class="workspace">
     <section class="hero">
       <h2>{{ hero.title }}</h2>
-      <p>{{ hero.copy }}</p>
+      <p v-if="hero.copy">{{ hero.copy }}</p>
     </section>
 
     <!-- 未配对：一个配对卡片，默认只需输配对码 -->
@@ -29,7 +29,7 @@
         <details class="manual">
           <summary>手动输入服务器地址</summary>
           <label class="field">
-            VoHive 地址
+            服务器地址
             <input v-model="serverUrl" class="mono" placeholder="http://192.168.1.2:7575" required>
           </label>
         </details>
@@ -40,7 +40,7 @@
     <!-- 已配对 -->
     <template v-else>
       <a v-if="connected" class="primary" :href="config.server_url || '#'" target="_blank" rel="noreferrer">
-        打开 VoHive
+        打开 VoHive 控制台
       </a>
       <button v-else class="primary" :disabled="busy" @click="reconnect">
         {{ busy ? '正在重连' : '重新连接' }}
@@ -81,12 +81,12 @@ const paired = computed(() => config.value.paired === true)
 const connected = computed(() => status.value.upstream?.connected === true)
 const discovered = computed(() => config.value.discovered_server_url || '')
 
-const stateLabel = computed(() => connected.value ? '已连接' : paired.value ? '等待连接' : '未配对')
+const stateLabel = computed(() => connected.value ? '已连接' : paired.value ? '未连接' : '未配对')
 
 const hero = computed(() => {
-  if (connected.value) return { title: '已接入 VoHive', copy: '运行正常' }
+  if (connected.value) return { title: '已接入 VoHive', copy: '' }
   if (paired.value) return { title: '正在连接', copy: connectionLabel(status.value.upstream?.state) }
-  return { title: '等待配对', copy: '在 VoHive 后台获取六位配对码' }
+  return { title: '等待配对', copy: '在 VoHive 控制台获取六位配对码' }
 })
 
 const capabilities = computed(() => {
@@ -97,16 +97,16 @@ const capabilities = computed(() => {
   const esimSupported = t.esim_supported === true
   const esimPrivileged = p.write_embedded_subscriptions === true
   return [
-    { name: 'SMS', label: smsReady ? '可用' : '需授权', ready: smsReady, na: false },
+    { name: 'SMS', label: smsReady ? '就绪' : '未授权', ready: smsReady, na: false },
     {
       name: 'NET',
-      label: netReady ? '可用' : connected.value ? '等待蜂窝网络' : '等待连接',
+      label: netReady ? '就绪' : connected.value ? '蜂窝网络未连接' : '不可用',
       ready: netReady,
       na: !connected.value
     },
     {
       name: 'eSIM',
-      label: !esimSupported ? '不支持' : esimPrivileged ? '可用' : '需系统确认',
+      label: !esimSupported ? '不支持' : esimPrivileged ? '就绪' : '待授权',
       ready: esimSupported && esimPrivileged,
       na: !esimSupported
     }
@@ -114,10 +114,11 @@ const capabilities = computed(() => {
 })
 
 function connectionLabel(value?: string): string {
-  if (!value) return '状态未知'
+  if (!value) return '未知'
   if (value === 'connecting') return '正在连接 VoHive'
-  if (value.startsWith('reconnecting')) return '网络中断，自动重试'
-  if (value.startsWith('waiting')) return '检查连接配置'
+  if (value.startsWith('reconnecting')) return '连接中断，正在重连'
+  if (value.startsWith('waiting')) return '连接配置无效'
+  if (value.startsWith('connection error')) return '连接错误'
   return '未连接'
 }
 

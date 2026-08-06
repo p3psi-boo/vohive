@@ -14,8 +14,6 @@ const props = defineProps<{
   sortDir: 'asc' | 'desc'
   selectedId: string
   filteredDevices: DeviceMgmtListItem[]
-  deviceCount: number
-  deviceLimit: number
 }>()
 
 const emit = defineEmits<{
@@ -96,15 +94,6 @@ const secondaryStatus = (d: DeviceMgmtListItem) => {
         <el-option label="升序" value="asc" />
         <el-option label="降序" value="desc" />
       </el-select>
-      <div v-if="deviceLimit > 0" class="flex items-center">
-        <el-tag
-          size="small"
-          :type="deviceCount >= deviceLimit ? 'warning' : 'info'"
-          class="w-full justify-center"
-        >
-          配额 {{ deviceCount }} / {{ deviceLimit }}
-        </el-tag>
-      </div>
     </div>
 
     <ListSkeleton v-if="loading && filteredDevices.length === 0" :rows="8" />

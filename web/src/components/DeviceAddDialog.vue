@@ -2,11 +2,13 @@
 import { computed, ref, watch } from 'vue'
 import type { AndroidEnrollmentCode, DeviceConfigDTO, DiscoveredAndroidAgent, DiscoveredDevice } from '../types/api'
 import { isWwanQmiControlPath } from '../utils/deviceBackend'
+import QrcodeVue from 'qrcode.vue'
 import {
   ArrowSync24Regular,
   CheckmarkCircle24Regular,
   Key24Regular,
   PhoneAdd24Regular,
+  QrCode24Regular,
   Save24Regular
 } from '@vicons/fluent'
 
@@ -37,6 +39,14 @@ const isQMIBackendOnly = computed(() => !isAndroid.value && isWwanQmiControlPath
 const isMBIMBackendOnly = computed(() => !isAndroid.value && String(props.addSelected?.mode || '').toLowerCase() === 'mbim')
 const androidName = ref('')
 const showFallback = ref(false)
+
+const pairingQrValue = computed(() => {
+  if (!props.androidPairingCode) return ''
+  return JSON.stringify({
+    server_url: props.androidPairingCode.server_url,
+    code: props.androidPairingCode.code
+  })
+})
 
 function setKind(kind: 'modem' | 'android') {
   props.addConfig.device_kind = kind
@@ -190,18 +200,26 @@ watch(() => props.modelValue, (open) => {
 
       <button class="fallback-toggle" type="button" @click="showFallback = !showFallback">
         <el-icon><Key24Regular /></el-icon>
-        {{ showFallback ? '收起手动方式' : '没有发现设备？使用六位配对码' }}
+        {{ showFallback ? '收起扫码/手动方式' : '没有自动发现设备？使用扫码或六位配对码' }}
       </button>
       <div v-if="showFallback" class="fallback-panel">
         <template v-if="androidPairingCode">
-          <p>在 Agent 本地网页输入服务器地址和下面的配对码：</p>
-          <code class="server-url">{{ androidPairingCode.server_url }}</code>
-          <strong class="pair-code">{{ androidPairingCode.code }}</strong>
-          <small>配对码五分钟内有效，Agent ID 和设备 ID 会自动绑定。</small>
+          <div class="qr-pairing-layout">
+            <div class="qr-box">
+              <QrcodeVue :value="pairingQrValue" :size="140" level="M" render-as="svg" background="#ffffff" foreground="#0f766e" />
+              <span class="qr-hint"><el-icon><QrCode24Regular /></el-icon>使用 App 扫码</span>
+            </div>
+            <div class="qr-info">
+              <p>在 Agent App 扫码，或在 Agent 本地网页输入服务器地址和配对码：</p>
+              <code class="server-url">{{ androidPairingCode.server_url }}</code>
+              <strong class="pair-code">{{ androidPairingCode.code }}</strong>
+              <small>配对码五分钟内有效，Agent ID 和设备 ID 会自动绑定。</small>
+            </div>
+          </div>
         </template>
         <template v-else>
-          <p>自动发现不可用时，生成一个临时配对码，在 Agent 本地网页中输入即可。</p>
-          <el-button type="primary" plain :loading="androidPairingLoading" @click="emit('create-pairing-code', androidName)">生成六位配对码</el-button>
+          <p>自动发现不可用时，生成临时配对二维码与六位码，在 Agent App 扫码或在 Agent 本地网页中输入即可。</p>
+          <el-button type="primary" plain :loading="androidPairingLoading" @click="emit('create-pairing-code', androidName)">生成配对二维码 / 六位码</el-button>
         </template>
       </div>
     </template>
@@ -242,8 +260,12 @@ watch(() => props.modelValue, (open) => {
 .fallback-toggle { display: flex; align-items: center; gap: 7px; margin-top: 20px; color: #64748b; font-size: 12px; }
 .fallback-toggle:hover { color: #0f766e; }
 .fallback-panel { display: grid; gap: 10px; margin-top: 10px; padding: 16px; border-radius: 14px; background: rgba(15,23,42,.04); color: #475569; font-size: 12px; }
-.server-url { padding: 8px 10px; border-radius: 8px; background: rgba(15,23,42,.08); color: #334155; }
-.pair-code { color: #0f766e; font-family: 'Fira Code', monospace; font-size: 34px; letter-spacing: .18em; }
+.qr-pairing-layout { display: flex; gap: 18px; align-items: center; }
+.qr-box { display: flex; flex-direction: column; align-items: center; gap: 6px; padding: 10px; background: white; border-radius: 12px; border: 1px solid rgba(13,148,136,.3); box-shadow: 0 4px 12px rgba(15,23,42,.05); }
+.qr-hint { display: flex; align-items: center; gap: 4px; color: #0f766e; font-size: 11px; font-weight: 700; }
+.qr-info { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 6px; }
+.server-url { padding: 8px 10px; border-radius: 8px; background: rgba(15,23,42,.08); color: #334155; word-break: break-all; }
+.pair-code { color: #0f766e; font-family: 'Fira Code', monospace; font-size: 30px; letter-spacing: .18em; }
 .fallback-panel small { color: #94a3b8; }
 @keyframes pulse { 50% { opacity: .45; transform: scale(.75); } }
 @keyframes orbit { 50% { transform: scale(1.15); opacity: .35; } }

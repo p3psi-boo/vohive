@@ -562,8 +562,8 @@ public class AgentService extends Service {
     private Notification notification(String text) {
         createNotificationChannel();
         Notification.Builder builder = new Notification.Builder(this, CHANNEL_ID);
-        return builder.setContentTitle("VoHive Android Agent")
-                .setContentText("Web 0.0.0.0:" + AgentConfig.httpPort(this) + " · " + text)
+        return builder.setContentTitle("VoHive Agent")
+                .setContentText("管理端口 " + AgentConfig.httpPort(this) + " · " + text)
                 .setSmallIcon(android.R.drawable.stat_sys_upload)
                 .setCategory(Notification.CATEGORY_SERVICE)
                 .setContentIntent(webPendingIntent())

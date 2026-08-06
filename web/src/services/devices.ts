@@ -113,7 +113,6 @@ export const devicesService = {
       const res = await api.get('/devices', { signal })
       return {
         devices: (res.data?.devices || []) as DeviceListVM[],
-        deviceLimit: (typeof res.data?.device_limit === 'number' ? res.data.device_limit : 0) as number,
       }
     })
   },
