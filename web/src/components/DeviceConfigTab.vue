@@ -10,6 +10,8 @@ import {
 import type { AndroidAgentStatus, AndroidSubscription, DeviceConfigDTO, DeviceOverviewItem } from '../types/api'
 import { devicesService } from '../services/devices'
 import { isWwanQmiControlPath } from '../utils/deviceBackend'
+import { useNetworkSwitchTransition } from '../composables/useNetworkSwitchTransition'
+import NetworkSwitchOverlay from './NetworkSwitchOverlay.vue'
 
 const props = defineProps<{
   editConfig: DeviceConfigDTO | null
@@ -117,14 +119,25 @@ async function refreshAndroidAgent(silent = false) {
   }
 }
 
+const switchTransition = useNetworkSwitchTransition()
+
 async function selectSubscription() {
   const id = String(props.editConfig?.id || '').trim()
   if (!id || selectedSubscriptionID.value == null) return
+  const label = subscriptionLabel(selectedSubscription.value)
   subscriptionActionLoading.value = true
   try {
     const result = await devicesService.selectAndroidSubscription(id, selectedSubscriptionID.value)
     if (!result.ok) throw new Error(result.error.message)
-    ElMessage.success('短信和代理已切换到所选 SIM')
+    ElMessage.success('短信和代理切换请求已下发')
+
+    switchTransition.startSwitch(label, {
+      durationSeconds: 12,
+      onPoll: async () => {
+        const res = await devicesService.getAndroidAgentStatus(id)
+        return res.ok && res.data?.online === true && res.data?.snapshot?.data_connected === true
+      }
+    })
     await refreshAndroidAgent()
   } catch (error) {
     ElMessage.error(error instanceof Error ? error.message : 'SIM 切换失败')
@@ -136,11 +149,20 @@ async function selectSubscription() {
 async function switchESIM(item: AndroidSubscription) {
   const id = String(props.editConfig?.id || '').trim()
   if (!id) return
+  const label = subscriptionLabel(item)
   subscriptionActionLoading.value = true
   try {
     const result = await devicesService.switchAndroidESIM(id, item.subscription_id, item.port_index || 0)
     if (!result.ok) throw new Error(result.error.message)
     ElMessage.success('eSIM 切换请求已发送')
+
+    switchTransition.startSwitch(label, {
+      durationSeconds: 12,
+      onPoll: async () => {
+        const res = await devicesService.getAndroidAgentStatus(id)
+        return res.ok && res.data?.online === true && res.data?.snapshot?.data_connected === true
+      }
+    })
     window.setTimeout(() => void refreshAndroidAgent(true), 1500)
   } catch (error) {
     ElMessage.error(error instanceof Error ? error.message : 'eSIM 切换失败')
@@ -178,6 +200,15 @@ function subscriptionLabel(item: AndroidSubscription | null) {
         <el-button v-if="!isAndroid" type="primary" :loading="saving" @click="emit('save')"><el-icon><Save24Regular /></el-icon>保存配置</el-button>
       </div>
     </div>
+
+    <!-- 网络切流与重连渐进式反馈 Banner -->
+    <NetworkSwitchOverlay
+      :visible="switchTransition.isSwitching.value"
+      :target-name="switchTransition.targetName.value"
+      :current-step="switchTransition.currentStep.value"
+      :countdown="switchTransition.countdown.value"
+      :step-text="switchTransition.stepText.value"
+    />
 
     <template v-if="editConfig && isAndroid">
       <section class="android-hero" :class="{ online: agentStatus?.online }">

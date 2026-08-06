@@ -66,6 +66,7 @@ declare module 'vue' {
     FieldRow: typeof import('./components/FieldRow.vue')['default']
     ListSkeleton: typeof import('./components/ListSkeleton.vue')['default']
     LoadingScreen: typeof import('./components/LoadingScreen.vue')['default']
+    NetworkSwitchOverlay: typeof import('./components/NetworkSwitchOverlay.vue')['default']
     OperatorSelectionDialog: typeof import('./components/OperatorSelectionDialog.vue')['default']
     PageHeader: typeof import('./components/PageHeader.vue')['default']
     RefreshButton: typeof import('./components/RefreshButton.vue')['default']

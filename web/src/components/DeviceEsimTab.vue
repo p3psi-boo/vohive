@@ -6,6 +6,8 @@ import { devicesService } from '../services/devices'
 import { errorMessage } from '../services/http'
 import { api } from '../stores/auth'
 import { useSensitiveVisibility } from '../composables/useSensitiveVisibility'
+import { useNetworkSwitchTransition } from '../composables/useNetworkSwitchTransition'
+import NetworkSwitchOverlay from './NetworkSwitchOverlay.vue'
 import EsimCardPolicyInline from './EsimCardPolicyInline.vue'
 import { applyOptimisticActiveState } from './deviceEsimOptimistic'
 import { pickNextDownloadAid } from './deviceEsimOverviewRefresh'
@@ -253,11 +255,23 @@ function applyOptimisticActive(targetICCID: string, aidHex: string) {
   profiles.value = applyOptimisticActiveState(profiles.value, targetICCID, aidHex)
 }
 
+const switchTransition = useNetworkSwitchTransition()
+
+function findProfileName(targetIccid: string): string {
+  for (const group of profiles.value) {
+    for (const p of group.profiles || []) {
+      if (p.iccid === targetIccid) return p.name || p.iccid
+    }
+  }
+  return targetIccid
+}
+
 // 切换 profile（启用/禁用）
 async function switchProfile(iccid: string, currentState: number, aidHex: string) {
   const action = currentState === 1 ? '禁用' : '启用'
+  const targetName = findProfileName(iccid)
   const confirmed = await ElMessageBox.confirm(
-    `确定要${action}此 Profile (${iccid}) 吗？切换后设备会短暂断网。`,
+    `确定要${action}此 Profile (${targetName}) 吗？切换后设备将进行蜂窝网络切流与过渡重连。`,
     `${action} Profile`,
     { confirmButtonText: action, cancelButtonText: '取消', type: 'warning' }
   ).then(() => true).catch(() => false)
@@ -270,8 +284,17 @@ async function switchProfile(iccid: string, currentState: number, aidHex: string
       aid_hex: aidHex
     })
     if (!result.ok) throw new Error(result.error.message || `${action}失败`)
-    ElMessage.success(`Profile ${action}成功`)
+    ElMessage.success(`Profile ${action}请求已成功下发`)
     applyOptimisticActive(iccid, aidHex)
+
+    // 启动网络渐进式切流反馈与重连验证
+    switchTransition.startSwitch(`Profile 「${targetName}」 ${action}`, {
+      durationSeconds: 12,
+      onPoll: async () => {
+        const res = await devicesService.getOverviewLite(props.deviceId)
+        return res.ok && res.data?.network_connected === true
+      }
+    })
   } catch (e: unknown) {
     ElMessage.error(errorMessage(e, `${action}失败`))
   } finally {
@@ -500,6 +523,15 @@ onBeforeUnmount(() => {
     </div>
 
     <template v-else>
+      <!-- 网络切流与重连渐进式反馈 Banner -->
+      <NetworkSwitchOverlay
+        :visible="switchTransition.isSwitching.value"
+        :target-name="switchTransition.targetName.value"
+        :current-step="switchTransition.currentStep.value"
+        :countdown="switchTransition.countdown.value"
+        :step-text="switchTransition.stepText.value"
+      />
+
       <!-- 芯片信息 -->
       <div v-if="chipInfo" class="ui-panel-muted p-4 relative">
       <div class="flex items-center justify-between gap-3 mb-3">
